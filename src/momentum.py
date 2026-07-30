@@ -5,6 +5,11 @@ from src.analyse import (
     validate_data,
     calculate_returns,
 )
+from src.backtest import (
+    calculate_backtest_statistics,
+    run_backtest,
+)
+
 
 def calculate_momentum_signal(df, lookback):
     df = df.copy()
@@ -15,42 +20,11 @@ def calculate_momentum_signal(df, lookback):
 
     return df
 
-
-def calculate_strategy_returns(df):
-    df = df.copy()
-
-    df["Position"]=df["Signal"].shift(1).fillna(0).astype(int)
-    df["StrategyReturn"]=df["Position"]*df["DailyReturn"].fillna(0)
-    df["StrategyCumulativeValue"]=(1 + df["StrategyReturn"]).cumprod()
-
-    return df
-
-
-def calculate_transaction_costs(df, cost_rate):
-    if cost_rate < 0:
-        raise ValueError("The transaction cost rate cannot be negative.")
-    df = df.copy()
-
-    df["Turnover"]=(df["Position"]-df["Position"].shift(1).fillna(0)).abs()
-    df["TransactionCost"]=df["Turnover"]*cost_rate
-    df["NetStrategyReturn"]=df["StrategyReturn"]-df["TransactionCost"]
-    df["NetStrategyCumulativeValue"]=(1+df["NetStrategyReturn"]).cumprod()
-
-    return df
-
-
 def calculate_momentum_statistics(df, lookback, cost_rate):
-    stats = {
-        "lookback": lookback,
-        "cost_rate": cost_rate,
-        "observations": len(df),
-        "buy_and_hold_return": df["CumulativeValue"].iloc[-1] - 1,
-        "gross_strategy_return": df["StrategyCumulativeValue"].iloc[-1] - 1,
-        "net_strategy_return": df["NetStrategyCumulativeValue"].iloc[-1] - 1,
-        "total_turnover": df["Turnover"].sum(),
-        "trade_events": (df["Turnover"] > 0).sum(),
-        "time_in_market": df["Position"].mean()
-    }
+    stats = calculate_backtest_statistics(df)
+
+    stats["lookback"] = lookback
+    stats["cost_rate"] = cost_rate
 
     return stats
 
@@ -107,10 +81,9 @@ def main():
     df = load_data(filepath)
     df = validate_data(df)
     df = calculate_returns(df)
-
     df = calculate_momentum_signal(df, lookback)
-    df = calculate_strategy_returns(df)
-    df = calculate_transaction_costs(df, cost_rate)
+
+    df = run_backtest(df, cost_rate)
 
     stats = calculate_momentum_statistics(
         df,
@@ -120,7 +93,7 @@ def main():
 
     print_momentum_report(stats)
     save_momentum_output(df)
-
+    
 
 if __name__ == "__main__":
     main()

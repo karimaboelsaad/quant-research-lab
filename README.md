@@ -1,16 +1,16 @@
 # Quant Project
 
-This project analyses historical price data for a single asset.
+This project analyses historical closing-price data for a single asset and tests a simple momentum trading strategy.
 
-It reads a CSV file containing dates and closing prices, checks that the data is valid, calculates returns and risk statistics, prints reports in the terminal, and saves the results to CSV files.
+It loads prices from a CSV file, validates the data, calculates returns and risk statistics, runs a backtest with transaction costs, prints reports in the terminal, and saves the results as CSV files.
 
-The basic analyser is in `src/analyse.py`, and its tests are in `tests/test_analyse.py`.
+## Input Data
 
-The input file should be placed at:
+Place the input file at:
 
 `data/prices.csv`
 
-It must contain two columns called `Date` and `Close`, with at least three rows of data.
+It must contain at least three rows and two columns named `Date` and `Close`.
 
 Example:
 
@@ -21,59 +21,113 @@ Date,Close
 2024-01-03,110
 ```
 
-Dates must be valid, prices must be positive numbers, and duplicate dates are not allowed. The rows do not need to be sorted because the program sorts them automatically.
+Dates must be valid, closing prices must be positive numbers, and duplicate dates are not allowed. The rows do not need to be ordered because the program sorts them automatically.
 
-To run the basic analyser, use:
+## Price Analyser
+
+The basic analyser is located in `src/analyse.py`.
+
+It calculates:
+
+- Daily returns
+- Cumulative value
+- Running maximum
+- Drawdown
+- Annualised volatility
+
+Run it from the project root with:
 
 ```bash
 python src/analyse.py
 ```
 
-The program prints a summary report and saves the processed data to:
+The processed data is saved to:
 
 `output/analysed_prices.csv`
 
-The output includes daily returns, cumulative value, running maximum, and drawdown.
-
 ## Momentum Strategy
 
-The project also includes a simple long-only momentum strategy in `src/momentum.py`.
+The momentum strategy is located in `src/momentum.py`.
 
-The strategy:
+It measures how much the price has changed over a chosen lookback period. When the lookback return is positive, the strategy holds the asset. Otherwise, it stays in cash.
 
-- Calculates the return over a chosen lookback period
-- Holds the asset when the lookback return is positive
-- Stays in cash when the lookback return is zero or negative
-- Delays signals by one period to avoid look-ahead bias
-- Calculates turnover and transaction costs
-- Compares buy-and-hold, gross strategy returns, and net strategy returns
+Signals are delayed by one period so the strategy cannot use current information to earn the current period's return.
 
-To run the momentum strategy, use:
+Run the strategy with:
 
 ```bash
 python -m src.momentum
 ```
 
-The momentum results are saved to:
+The program reports the buy-and-hold return, gross strategy return, net strategy return, turnover, trade events, and time in the market.
+
+The results are saved to:
 
 `output/momentum_results.csv`
 
-The momentum tests are located in:
+## Backtesting Engine
 
-`tests/test_momentum.py`
+The reusable backtesting logic is located in `src/backtest.py`.
+
+The momentum strategy creates a `Signal` column. The backtesting engine then:
+
+1. Converts signals into delayed positions
+2. Calculates gross strategy returns
+3. Measures turnover
+4. Applies transaction costs
+5. Calculates net returns and cumulative value
+6. Produces general backtest statistics
+
+Keeping the backtesting logic separate means future strategies can use the same engine without repeating the calculations.
+
+## Project Structure
+
+```text
+quant-project/
+├── data/
+│   └── prices.csv
+├── output/
+│   ├── analysed_prices.csv
+│   └── momentum_results.csv
+├── src/
+│   ├── analyse.py
+│   ├── backtest.py
+│   └── momentum.py
+├── tests/
+│   ├── test_analyse.py
+│   ├── test_backtest.py
+│   └── test_momentum.py
+├── .gitignore
+├── README.md
+└── requirements.txt
+```
 
 ## Running the Tests
 
-To run all tests, use:
+Run the complete test suite with:
 
 ```bash
 python -m pytest -v
 ```
 
-To run only the momentum tests, use:
+Run only the analyser tests with:
+
+```bash
+python -m pytest tests/test_analyse.py -v
+```
+
+Run only the backtesting tests with:
+
+```bash
+python -m pytest tests/test_backtest.py -v
+```
+
+Run only the momentum tests with:
 
 ```bash
 python -m pytest tests/test_momentum.py -v
 ```
 
-The project currently only supports one asset at a time, uses closing prices only, and assumes 252 trading days per year when calculating annualised volatility.
+## Current Limitations
+
+The project currently supports one asset at a time and uses closing prices only. Annualised volatility assumes 252 trading days per year.

@@ -6,14 +6,14 @@ from src.analyse import (
     validate_data,
 )
 
+from src.backtest import run_backtest
+
 from src.momentum import (
     calculate_momentum_signal,
-    calculate_strategy_returns,
-    calculate_transaction_costs,
     calculate_momentum_statistics,
+    main,
     print_momentum_report,
     save_momentum_output,
-    main,
 )
 
 
@@ -49,8 +49,7 @@ def run_momentum_pipeline(
     df = validate_data(raw_df)
     df = calculate_returns(df)
     df = calculate_momentum_signal(df, lookback)
-    df = calculate_strategy_returns(df)
-    df = calculate_transaction_costs(df, cost_rate)
+    df = run_backtest(df, cost_rate)
 
     return df
 
@@ -62,6 +61,7 @@ def test_momentum_signal_calculates_lookback_returns():
 
     df = validate_data(raw_df)
     df = calculate_returns(df)
+
     result = calculate_momentum_signal(
         df,
         lookback=3,
@@ -96,6 +96,7 @@ def test_momentum_signal_handles_positive_zero_and_negative_returns():
 
     df = validate_data(raw_df)
     df = calculate_returns(df)
+
     result = calculate_momentum_signal(
         df,
         lookback=1,
@@ -144,196 +145,66 @@ def test_momentum_signal_does_not_modify_input():
     )
 
 
-def test_strategy_uses_previous_signal_as_position():
-    df = pd.DataFrame(
-        {
-            "Signal": [0, 1, 1, 0],
-            "DailyReturn": [
-                float("nan"),
-                0.05,
-                0.10,
-                -0.05,
-            ],
-        }
-    )
-
-    result = calculate_strategy_returns(df)
-
-    assert result["Position"].tolist() == [
-        0,
-        0,
-        1,
-        1,
-    ]
-
-    assert result["StrategyReturn"].tolist() == (
-        pytest.approx(
-            [
-                0.0,
-                0.0,
-                0.10,
-                -0.05,
-            ]
-        )
-    )
-
-    assert result["StrategyCumulativeValue"].tolist() == (
-        pytest.approx(
-            [
-                1.0,
-                1.0,
-                1.10,
-                1.045,
-            ]
-        )
-    )
-
-
-def test_strategy_does_not_use_current_signal():
-    df = pd.DataFrame(
-        {
-            "Signal": [0, 1, 0],
-            "DailyReturn": [
-                0.0,
-                0.20,
-                -0.10,
-            ],
-        }
-    )
-
-    result = calculate_strategy_returns(df)
-
-    assert result["Position"].tolist() == [
-        0,
-        0,
-        1,
-    ]
-
-    assert result["StrategyReturn"].tolist() == (
-        pytest.approx(
-            [
-                0.0,
-                0.0,
-                -0.10,
-            ]
-        )
-    )
-
-
-def test_transaction_costs_calculate_turnover():
-    df = pd.DataFrame(
-        {
-            "Position": [0, 1, 1, 0],
-            "StrategyReturn": [
-                0.0,
-                0.03,
-                -0.02,
-                0.0,
-            ],
-        }
-    )
-
-    result = calculate_transaction_costs(
-        df,
+def test_complete_momentum_pipeline():
+    df = run_momentum_pipeline(
+        prices=[100, 110, 120, 108, 90, 99],
+        lookback=3,
         cost_rate=0.001,
     )
 
-    assert result["Turnover"].tolist() == (
-        pytest.approx(
-            [
-                0.0,
-                1.0,
-                0.0,
-                1.0,
-            ]
-        )
-    )
+    assert df["Signal"].tolist() == [
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+    ]
 
-    assert result["TransactionCost"].tolist() == (
-        pytest.approx(
-            [
-                0.0,
-                0.001,
-                0.0,
-                0.001,
-            ]
-        )
-    )
+    assert df["Position"].tolist() == [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+    ]
 
-    assert result["NetStrategyReturn"].tolist() == (
-        pytest.approx(
-            [
-                0.0,
-                0.029,
-                -0.02,
-                -0.001,
-            ]
-        )
-    )
-
-    assert result[
-        "NetStrategyCumulativeValue"
-    ].tolist() == pytest.approx(
+    assert df["StrategyReturn"].tolist() == pytest.approx(
         [
-            1.0,
-            1.029,
-            1.00842,
-            1.00741158,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            -1 / 6,
+            0.0,
         ]
     )
 
-
-@pytest.mark.parametrize(
-    "invalid_cost_rate",
-    [
-        -0.001,
-        -0.01,
-        -1,
-    ],
-)
-def test_transaction_costs_reject_negative_rates(
-    invalid_cost_rate,
-):
-    df = pd.DataFrame(
-        {
-            "Position": [0, 1, 0],
-            "StrategyReturn": [0.0, 0.05, 0.0],
-        }
+    assert df["Turnover"].tolist() == pytest.approx(
+        [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+        ]
     )
 
-    with pytest.raises(ValueError):
-        calculate_transaction_costs(
-            df,
-            cost_rate=invalid_cost_rate,
-        )
-
-
-def test_zero_transaction_cost_does_not_change_returns():
-    df = pd.DataFrame(
-        {
-            "Position": [0, 1, 1, 0],
-            "StrategyReturn": [
-                0.0,
-                0.05,
-                -0.02,
-                0.0,
-            ],
-        }
+    assert df["TransactionCost"].tolist() == pytest.approx(
+        [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.001,
+            0.001,
+        ]
     )
 
-    result = calculate_transaction_costs(
-        df,
-        cost_rate=0,
-    )
-
-    assert result["TransactionCost"].tolist() == (
-        pytest.approx([0.0, 0.0, 0.0, 0.0])
-    )
-
-    assert result["NetStrategyReturn"].tolist() == (
-        pytest.approx(
-            result["StrategyReturn"].tolist()
-        )
+    assert df["NetStrategyCumulativeValue"].iloc[-1] == (
+        pytest.approx(0.831501)
     )
 
 
@@ -354,26 +225,24 @@ def test_momentum_statistics():
     assert stats["cost_rate"] == pytest.approx(0.001)
     assert stats["observations"] == 6
 
-    assert stats["buy_and_hold_return"] == (
-        pytest.approx(-0.01)
+    assert stats["buy_and_hold_return"] == pytest.approx(
+        -0.01
     )
 
-    assert stats["gross_strategy_return"] == (
-        pytest.approx(-1 / 6)
+    assert stats["gross_strategy_return"] == pytest.approx(
+        -1 / 6
     )
 
-    assert stats["net_strategy_return"] == (
-        pytest.approx(-0.168499)
+    assert stats["net_strategy_return"] == pytest.approx(
+        -0.168499
     )
 
-    assert stats["total_turnover"] == (
-        pytest.approx(2)
-    )
+    assert stats["total_turnover"] == pytest.approx(2)
 
     assert stats["trade_events"] == 2
 
-    assert stats["time_in_market"] == (
-        pytest.approx(1 / 6)
+    assert stats["time_in_market"] == pytest.approx(
+        1 / 6
     )
 
 
@@ -464,7 +333,6 @@ def test_save_momentum_output_writes_required_columns(
     ]
 
     assert "UnusedColumn" not in saved_df.columns
-
     assert len(saved_df) == 6
 
     assert saved_df[
@@ -472,6 +340,25 @@ def test_save_momentum_output_writes_required_columns(
     ].iloc[-1] == pytest.approx(
         0.831501,
         abs=0.000001,
+    )
+
+
+def test_momentum_pipeline_does_not_modify_raw_input():
+    raw_df = make_price_dataframe(
+        [100, 110, 120, 108, 90, 99]
+    )
+
+    original_df = raw_df.copy(deep=True)
+
+    df = validate_data(raw_df)
+    df = calculate_returns(df)
+    df = calculate_momentum_signal(df, lookback=3)
+
+    run_backtest(df, cost_rate=0.001)
+
+    pd.testing.assert_frame_equal(
+        raw_df,
+        original_df,
     )
 
 
