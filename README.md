@@ -2,7 +2,7 @@
 
 This project analyses historical closing-price data for a single asset and tests a momentum trading strategy.
 
-It loads and validates price data, calculates returns, runs backtests with transaction costs, compares momentum lookback periods, and evaluates a selected strategy using chronological training, validation, and test periods.
+It loads and validates price data, calculates returns, runs backtests with transaction costs, compares momentum lookback periods, performs chronological train-validation-test optimisation, and evaluates the strategy using expanding-window walk-forward testing.
 
 ## Input Data
 
@@ -94,7 +94,9 @@ The reported statistics include:
 - Number of trade events
 - Time in the market
 
-Annualised calculations assume 252 trading periods per year. The Sharpe ratio currently assumes a risk-free rate of zero.
+Annualised calculations assume 252 trading periods per year.
+
+The Sharpe ratio currently assumes a risk-free rate of zero.
 
 Keeping the backtesting logic separate allows future strategies to use the same engine without repeating the calculations.
 
@@ -102,7 +104,7 @@ Keeping the backtesting logic separate allows future strategies to use the same 
 
 The chronological data-splitting logic is located in `src/split.py`.
 
-It divides the historical data into three periods:
+For the basic optimisation pipeline, the historical data is divided into:
 
 - Training data for comparing all candidate lookbacks
 - Validation data for choosing between the strongest candidates
@@ -135,8 +137,7 @@ The optimisation logic is located in `src/optimise.py`.
 The optimisation process is:
 
 ```text
-Split the data chronologically
-→ evaluate all lookbacks on training data
+Evaluate all lookbacks on training data
 → keep the strongest candidates
 → evaluate those candidates on validation data
 → select one final lookback
@@ -155,6 +156,66 @@ Split the data chronologically
 
 The test set is used only after the final lookback has been selected.
 
+## Walk-Forward Evaluation
+
+The walk-forward logic is located in `src/walk_forward.py`.
+
+A single train-validation-test split can produce results that depend heavily on one particular test period. Walk-forward evaluation repeats the optimisation process across multiple points in time.
+
+The project uses an expanding training window.
+
+Example:
+
+```text
+Window 1:
+Training      0–399
+Validation  400–499
+Test        500–599
+
+Window 2:
+Training      0–499
+Validation  500–599
+Test        600–699
+
+Window 3:
+Training      0–599
+Validation  600–699
+Test        700–799
+```
+
+The training period grows as more historical data becomes available.
+
+For each window, the process is:
+
+```text
+Evaluate all lookbacks on training data
+→ keep the strongest candidates
+→ select the best candidate on validation data
+→ use that lookback on the unseen test period
+```
+
+The selected lookback is allowed to change between windows.
+
+For example:
+
+```text
+Test period 1 → lookback 5
+Test period 2 → lookback 20
+Test period 3 → lookback 10
+```
+
+This simulates a strategy that periodically re-optimises its parameter using only information that would have been available at the time.
+
+`generate_walk_forward_windows()` creates the chronological window boundaries.
+
+`run_walk_forward_window()` performs training, validation, lookback selection, and testing for one window.
+
+`run_walk_forward()` executes every window and combines all unseen test periods into one out-of-sample performance history.
+
+The cumulative values are recalculated after the test periods are combined so capital continues between windows rather than resetting to 1 at the start of each test period.
+
+Overall performance statistics are then calculated across the full combined out-of-sample period.
+
 ## Project Structure
 
 ```text
@@ -169,13 +230,15 @@ quant-project/
 │   ├── backtest.py
 │   ├── momentum.py
 │   ├── optimise.py
-│   └── split.py
+│   ├── split.py
+│   └── walk_forward.py
 ├── tests/
 │   ├── test_analyse.py
 │   ├── test_backtest.py
 │   ├── test_momentum.py
 │   ├── test_optimise.py
-│   └── test_split.py
+│   ├── test_split.py
+│   └── test_walk_forward.py
 ├── .gitignore
 ├── README.md
 └── requirements.txt
@@ -197,6 +260,7 @@ python -m pytest tests/test_backtest.py -v
 python -m pytest tests/test_momentum.py -v
 python -m pytest tests/test_split.py -v
 python -m pytest tests/test_optimise.py -v
+python -m pytest tests/test_walk_forward.py -v
 ```
 
 ## Current Limitations
@@ -206,6 +270,9 @@ The project currently:
 - Supports one asset at a time
 - Uses closing prices only
 - Implements only a long-or-cash momentum strategy
-- Uses fixed training, validation, and test periods rather than walk-forward evaluation
+- Uses a fixed set of candidate lookback periods
+- Uses expanding-window walk-forward evaluation only
 - Assumes 252 trading periods per year
 - Assumes a zero risk-free rate when calculating the Sharpe ratio
+- Does not yet perform statistical significance or robustness testing
+- Does not yet support portfolio-level or multi-asset strategies
