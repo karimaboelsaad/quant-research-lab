@@ -1,12 +1,16 @@
 # Quant Project
 
-This project analyses historical closing-price data for a single asset and tests momentum and mean-reversion trading strategies.
+This project analyses historical closing-price data and tests momentum, mean-reversion, and pairs-trading strategies.
 
-It loads and validates price data, calculates returns, runs reusable backtests with transaction costs, performs chronological train-validation-test optimisation, and evaluates strategies using expanding-window walk-forward testing.
+It loads and validates price data, calculates returns, runs backtests with transaction costs, performs chronological train-validation-test optimisation, and evaluates strategies using expanding-window walk-forward testing.
+
+The momentum and mean-reversion strategies operate on a single asset. The pairs strategy studies the statistical relationship between two assets and trades deviations in their estimated spread.
 
 ## Input Data
 
-Place the input file at:
+### Single-Asset Data
+
+Momentum, mean reversion, and the basic price analyser use:
 
 `data/prices.csv`
 
@@ -24,6 +28,25 @@ Date,Close
 Dates must be valid, closing prices must be positive numbers, and duplicate dates are not allowed.
 
 The rows do not need to be ordered because the program sorts them automatically.
+
+### Pair Data
+
+Pairs trading uses:
+
+`data/pair_prices.csv`
+
+The file contains two aligned closing-price series:
+
+```csv
+Date,CloseA,CloseB
+2024-01-01,101,50
+2024-01-02,103,51
+2024-01-03,106,52
+```
+
+`CloseA` is treated as the dependent asset and `CloseB` as the explanatory asset when estimating the pair regression.
+
+Both prices must correspond to the same date so that the relationship between the assets can be calculated correctly.
 
 ## Price Analyser
 
@@ -49,9 +72,9 @@ The processed data is saved to:
 
 ## Backtesting Engine
 
-The reusable backtesting logic is located in `src/backtest.py`.
+The reusable single-asset backtesting logic is located in `src/backtest.py`.
 
-Each strategy first creates a `Signal` column. The backtesting engine then:
+Each single-asset strategy first creates a `Signal` column. The backtesting engine then:
 
 1. Delays signals to create positions
 2. Calculates gross strategy returns
@@ -86,7 +109,9 @@ Annualised calculations assume 252 trading periods per year.
 
 The Sharpe ratio currently assumes a risk-free rate of zero.
 
-Keeping the backtesting logic separate allows different strategies to use the same engine without repeating the calculations.
+Keeping the backtesting logic separate allows the single-asset strategies to use the same engine without repeating the calculations.
+
+Pairs trading uses separate two-leg return calculations because one spread position represents simultaneous positions in two assets.
 
 ## Momentum Strategy
 
@@ -266,13 +291,285 @@ are treated as two individual candidates rather than creating new combinations f
 
 The test set is used only after the final parameter combination has been selected.
 
+## Pairs Trading Strategy
+
+The pairs-trading strategy is located in:
+
+`src/pairs.py`
+
+Instead of trading one asset based only on its own price history, pairs trading studies the relationship between two assets.
+
+The relationship is estimated using ordinary least-squares regression:
+
+```text
+CloseA = Alpha + Beta × CloseB + Error
+```
+
+`Alpha` is the regression intercept.
+
+`Beta` is the hedge ratio describing how much `CloseA` tends to change relative to `CloseB`.
+
+The estimated value of `CloseA` is:
+
+```text
+PredictedA = Alpha + Beta × CloseB
+```
+
+The pair spread is the regression residual:
+
+```text
+Spread = CloseA - PredictedA
+```
+
+or equivalently:
+
+```text
+Spread = CloseA - Alpha - Beta × CloseB
+```
+
+The trading strategy looks for unusually large deviations in this spread.
+
+## Pair Spread Z-Score
+
+The spread is standardised using a rolling z-score:
+
+```text
+ZScore = (Spread - RollingMean) / RollingStd
+```
+
+The pairs strategy uses symmetric entry conditions.
+
+For example:
+
+```text
+EntryThreshold = 2.0
+ExitThreshold = 0.5
+```
+
+A sufficiently negative spread produces a long-spread signal:
+
+```text
+ZScore <= -EntryThreshold → Signal = 1
+```
+
+A sufficiently positive spread produces a short-spread signal:
+
+```text
+ZScore >= EntryThreshold → Signal = -1
+```
+
+The strategy exits when the spread moves back toward its normal range.
+
+For a positive hedge ratio:
+
+```text
+Signal = 1
+→ long A
+→ short Beta units of B
+
+Signal = -1
+→ short A
+→ long Beta units of B
+
+Signal = 0
+→ flat
+```
+
+Like mean reversion, the pairs signal is stateful.
+
+## Pair Regression
+
+The pair regression is calculated by:
+
+`calculate_pair_regression()`
+
+It estimates:
+
+```text
+Alpha
+Beta
+```
+
+using historical observations of `CloseA` and `CloseB`.
+
+The regression coefficients are kept separate from `run_pair_strategy()`.
+
+This is important for out-of-sample testing.
+
+For example:
+
+```text
+Training data
+→ estimate Alpha and Beta
+
+Validation data
+→ use the already-estimated Alpha and Beta
+```
+
+The validation period is not allowed to estimate the relationship that is supposedly being tested on that same future period.
+
+The same principle applies to test periods.
+
+## Pair Stationarity and Cointegration
+
+Pairs trading relies on the idea that two individually wandering price series may still maintain a relatively stable long-run relationship.
+
+Two related statistical diagnostics are included.
+
+### Augmented Dickey-Fuller Test
+
+`test_spread_stationarity()` applies an Augmented Dickey-Fuller test to the calculated spread.
+
+The null hypothesis is that the spread contains a unit root and is non-stationary.
+
+A sufficiently small p-value provides evidence against that null hypothesis.
+
+The ADF test therefore asks:
+
+```text
+Is this particular spread stationary?
+```
+
+### Cointegration Test
+
+`test_pair_cointegration()` applies an Engle-Granger cointegration test to `CloseA` and `CloseB`.
+
+It asks whether the two price series have evidence of a stable long-run linear relationship despite potentially being non-stationary individually.
+
+The null hypothesis is that the two price series are not cointegrated.
+
+A sufficiently small p-value provides evidence against that null hypothesis.
+
+The two diagnostics are related but serve slightly different purposes:
+
+```text
+ADF
+→ tests the calculated spread directly
+
+Cointegration
+→ formally tests whether A and B have a stationary long-run relationship
+```
+
+The cointegration test is treated as the primary formal test of the pair relationship.
+
+## Pair Backtesting
+
+Pairs trading requires separate return calculations because a spread position contains two asset positions.
+
+The one-period pair P&L is:
+
+```text
+PairPnL =
+PositionA × ChangeInA
++
+PositionB × ChangeInB
+```
+
+Gross exposure is:
+
+```text
+GrossExposure =
+|PositionA| × PreviousCloseA
++
+|PositionB| × PreviousCloseB
+```
+
+The strategy return is:
+
+```text
+StrategyReturn = PairPnL / GrossExposure
+```
+
+Signals are still delayed by one period:
+
+```text
+SpreadPosition[t] = Signal[t - 1]
+```
+
+so current information cannot earn the current period's return.
+
+Transaction costs are currently based on changes in the spread position.
+
+For example:
+
+```text
+0 → 1     turnover = 1
+1 → 0     turnover = 1
+1 → -1    turnover = 2
+```
+
+The complete strategy pipeline is handled by:
+
+`run_pair_strategy()`
+
+Run the standalone strategy with:
+
+```bash
+python -m src.pairs
+```
+
+The results are saved to:
+
+`output/pair_results.csv`
+
+The standalone run estimates the pair regression using the complete supplied dataset, so it should be treated as an exploratory in-sample backtest.
+
+The optimisation and walk-forward pipelines provide the more meaningful out-of-sample evaluation.
+
+## Pair Optimisation
+
+The pair optimisation logic is located in:
+
+`src/pairs_optimise.py`
+
+The user-supplied strategy parameters are:
+
+```text
+Lookback
+EntryThreshold
+ExitThreshold
+```
+
+`Alpha` and `Beta` are not grid-search parameters.
+
+They are estimated from historical price data using regression.
+
+The optimisation process is:
+
+```text
+Estimate the pair relationship from available training data
+→ evaluate all valid strategy parameter combinations on training data
+→ keep the strongest candidate combinations
+→ evaluate those candidates on validation data
+→ select the strongest candidate
+→ evaluate it on test data
+```
+
+`evaluate_pair_period()` evaluates one parameter combination while preserving the required historical context.
+
+For validation periods, the regression is fitted using data before the validation period.
+
+For test periods, the regression is fitted using all data available before the test period.
+
+This prevents validation and test prices from being used to estimate their own regression coefficients.
+
+`evaluate_pair_parameters_on_period()` evaluates the complete parameter grid.
+
+`select_top_pair_parameters()` keeps the strongest training candidates.
+
+`evaluate_pair_candidates_on_period()` evaluates those candidates on validation data.
+
+`select_best_pair_parameters()` chooses the strongest validation candidate.
+
+`run_pair_optimisation()` connects the complete training-validation-test process.
+
 ## Data Splitting
 
 The chronological data-splitting logic is located in `src/split.py`.
 
-For the basic optimisation pipelines, the historical data is divided into:
+For the basic optimisation pipelines, historical data is divided into:
 
-- Training data for comparing all candidate parameters
+- Training data for comparing candidate parameters
 - Validation data for choosing between the strongest candidates
 - Test data for one final evaluation
 
@@ -294,7 +591,7 @@ The generic walk-forward window logic is located in:
 
 This file only generates chronological train-validation-test boundaries.
 
-It does not contain momentum-specific or mean-reversion-specific strategy logic.
+It does not contain strategy-specific logic.
 
 The project uses an expanding training window.
 
@@ -391,16 +688,56 @@ can change between windows.
 
 As with momentum, cumulative values are recalculated across the combined test periods so capital continues between windows.
 
+## Pair Walk-Forward Evaluation
+
+The pair walk-forward logic is located in:
+
+`src/pairs_walk_forward.py`
+
+For each pair window, the process is:
+
+```text
+Estimate the pair relationship from historical data
+→ evaluate parameter combinations on training data
+→ keep the strongest candidates
+→ evaluate those candidates on validation data
+→ select the best parameter combination
+→ estimate the relationship using all available pre-test data
+→ evaluate the strategy on the unseen test period
+```
+
+The selected:
+
+```text
+Lookback
+EntryThreshold
+ExitThreshold
+```
+
+can change between windows.
+
+The regression coefficients can also change as additional historical information becomes available.
+
+However, each validation or test period uses coefficients estimated without looking into that period's future prices.
+
+`run_pair_walk_forward_window()` performs the complete optimisation and test process for one window.
+
+`run_pair_walk_forward()` executes every window and combines the unseen test periods into a single out-of-sample performance history.
+
+Cumulative strategy values are recalculated after the test periods are combined so capital continues across walk-forward windows.
+
 ## Project Structure
 
 ```text
 quant-project/
 ├── data/
-│   └── prices.csv
+│   ├── prices.csv
+│   └── pair_prices.csv
 ├── output/
 │   ├── analysed_prices.csv
 │   ├── momentum_results.csv
-│   └── mean_reversion_results.csv
+│   ├── mean_reversion_results.csv
+│   └── pair_results.csv
 ├── src/
 │   ├── analyse.py
 │   ├── backtest.py
@@ -411,7 +748,10 @@ quant-project/
 │   ├── momentum_walk_forward.py
 │   ├── mean_reversion.py
 │   ├── mean_reversion_optimise.py
-│   └── mean_reversion_walk_forward.py
+│   ├── mean_reversion_walk_forward.py
+│   ├── pairs.py
+│   ├── pairs_optimise.py
+│   └── pairs_walk_forward.py
 ├── tests/
 │   ├── test_analyse.py
 │   ├── test_backtest.py
@@ -422,7 +762,10 @@ quant-project/
 │   ├── test_momentum_walk_forward.py
 │   ├── test_mean_reversion.py
 │   ├── test_mean_reversion_optimise.py
-│   └── test_mean_reversion_walk_forward.py
+│   ├── test_mean_reversion_walk_forward.py
+│   ├── test_pairs.py
+│   ├── test_pairs_optimise.py
+│   └── test_pairs_walk_forward.py
 ├── .gitignore
 ├── README.md
 └── requirements.txt
@@ -451,34 +794,62 @@ python -m pytest tests/test_momentum_walk_forward.py -v
 python -m pytest tests/test_mean_reversion.py -v
 python -m pytest tests/test_mean_reversion_optimise.py -v
 python -m pytest tests/test_mean_reversion_walk_forward.py -v
+
+python -m pytest tests/test_pairs.py -v
+python -m pytest tests/test_pairs_optimise.py -v
+python -m pytest tests/test_pairs_walk_forward.py -v
 ```
 
-The complete test suite currently passes.
+The pairs strategy introduces `statsmodels` for the ADF and Engle-Granger cointegration tests.
 
 ## Current Limitations
 
 The project currently:
 
-- Supports one asset at a time
 - Uses closing prices only
-- Implements long-or-cash strategies
-- Implements momentum and mean-reversion strategies
+- Implements single-asset momentum and mean-reversion strategies
+- Implements a two-asset pairs-trading strategy
 - Uses fixed parameter grids supplied by the researcher
 - Uses expanding-window walk-forward evaluation only
-- Uses a fixed proportional transaction-cost model
+- Uses a simplified proportional transaction-cost model
 - Does not model bid-ask spreads
 - Does not model slippage
 - Does not model market impact
-- Does not support position sizing
-- Does not support leverage
+- Does not yet implement general portfolio-level position sizing
+- Does not yet support arbitrary multi-asset portfolios
+- Does not model leverage explicitly
 - Assumes 252 trading periods per year
 - Assumes a zero risk-free rate when calculating the Sharpe ratio
-- Does not yet perform statistical significance or robustness testing
-- Does not yet support portfolio-level or multi-asset strategies
+- Does not yet perform bootstrap or permutation-based statistical robustness testing
+- Uses OLS to estimate a single linear hedge ratio for pairs trading
+- Does not yet dynamically update the hedge ratio inside an individual test period
+- Uses a simplified pair transaction-cost model based on spread-position turnover rather than detailed trading costs for each individual leg
 
 There is also a transaction-cost detail at walk-forward boundaries that can be improved.
 
 If the selected strategy parameters change between consecutive walk-forward windows, the first transaction cost in the new window is currently based on the position generated by the newly selected strategy rather than explicitly using the final deployed position from the previous test window.
 
+For pairs trading, the same issue can also arise when the estimated hedge ratio changes between consecutive windows.
+
 This can be refined later when the execution model is made more realistic.
 
+## Current Progress
+
+Completed components include:
+
+```text
+Price loading and analysis
+→ reusable single-asset backtesting
+→ momentum
+→ train-validation-test optimisation
+→ historical warm-up handling
+→ walk-forward evaluation
+→ mean reversion
+→ pairs trading
+→ regression and hedge-ratio estimation
+→ stationarity and cointegration testing
+→ pair optimisation
+→ pair walk-forward evaluation
+```
+
+The next major stages are multi-asset portfolio construction and stronger statistical robustness testing.
