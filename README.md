@@ -2,7 +2,7 @@
 
 This project analyses historical closing-price data and tests momentum, mean-reversion, and pairs-trading strategies.
 
-It loads and validates price data, calculates returns, runs backtests with transaction costs, performs chronological train-validation-test optimisation, and evaluates strategies using expanding-window walk-forward testing.
+It loads and validates price data, calculates returns, runs backtests with transaction costs, performs chronological train-validation-test optimisation, evaluates strategies using expanding-window walk-forward testing, and combines strategy returns through static and dynamic multi-asset portfolio construction.
 
 The momentum and mean-reversion strategies operate on a single asset. The pairs strategy studies the statistical relationship between two assets and trades deviations in their estimated spread.
 
@@ -47,6 +47,39 @@ Date,CloseA,CloseB
 `CloseA` is treated as the dependent asset and `CloseB` as the explanatory asset when estimating the pair regression.
 
 Both prices must correspond to the same date so that the relationship between the assets can be calculated correctly.
+
+### Portfolio Data
+
+Static portfolio analysis uses:
+
+`data/portfolio_prices.csv`
+
+The file must contain a `Date` column and at least two asset price columns.
+
+Example:
+
+```csv
+Date,A,B,C
+2024-01-01,100,80,150
+2024-01-02,102,79,151
+2024-01-03,101,81,152
+```
+
+Dynamic portfolio allocation currently uses:
+
+`data/dynamic_strategy_returns.csv`
+
+which contains previously generated momentum and mean-reversion return streams for several assets.
+
+Example columns include:
+
+```text
+Date
+A_MomentumReturn
+A_MeanReversionReturn
+B_MomentumReturn
+B_MeanReversionReturn
+```
 
 ## Price Analyser
 
@@ -726,18 +759,241 @@ However, each validation or test period uses coefficients estimated without look
 
 Cumulative strategy values are recalculated after the test periods are combined so capital continues across walk-forward windows.
 
+## Multi-Asset Portfolio Construction
+
+General multi-asset portfolio logic is located in:
+
+`src/portfolio.py`
+
+Returns are calculated independently for every asset.
+
+The portfolio module can calculate:
+
+- Asset returns
+- Correlation matrices
+- Covariance matrices
+- Equal portfolio weights
+- Inverse-volatility weights
+- Portfolio returns
+- Portfolio volatility
+- Rebalancing turnover
+- Transaction costs
+- Portfolio performance statistics
+
+Equal weighting assigns:
+
+```text
+Weight = 1 / NumberOfAssets
+```
+
+Inverse-volatility weighting assigns more capital to assets with lower historical volatility:
+
+```text
+Weight_i =
+(1 / Volatility_i)
+/
+Sum(1 / Volatility_j)
+```
+
+This is a simple inverse-volatility allocation rather than full risk-parity optimisation.
+
+Portfolio variance is calculated using:
+
+```text
+PortfolioVariance = wᵀ Σ w
+```
+
+where `w` is the vector of portfolio weights and `Σ` is the asset covariance matrix.
+
+Portfolio volatility is:
+
+```text
+PortfolioVolatility = sqrt(PortfolioVariance)
+```
+
+Run the standalone portfolio example with:
+
+```bash
+python -m src.portfolio
+```
+
+The results are saved to:
+
+`output/portfolio_results.csv`
+
+## Portfolio Rebalancing and Costs
+
+Fixed target weights drift when assets produce different returns.
+
+The drifted weight of an asset is calculated as:
+
+```text
+DriftedWeight =
+TargetWeight × (1 + AssetReturn)
+/
+(1 + PortfolioReturn)
+```
+
+Turnover measures the amount of trading required to restore the target weights.
+
+Transaction costs are applied proportionally:
+
+```text
+TransactionCost = Turnover × CostRate
+```
+
+and:
+
+```text
+NetPortfolioReturn =
+PortfolioReturn - TransactionCost
+```
+
+## Dynamic Multi-Strategy Portfolio
+
+Dynamic strategy allocation is located in:
+
+`src/dynamic_portfolio.py`
+
+Instead of assigning one strategy permanently to each asset, the dynamic portfolio compares recent momentum and mean-reversion performance separately for every asset.
+
+For each strategy, recent risk-adjusted performance is measured using a rolling annualised Sharpe-style score:
+
+```text
+Score =
+RollingMeanReturn
+/
+RollingReturnStd
+× sqrt(252)
+```
+
+Strategy returns are shifted by one period before calculating the score:
+
+```text
+PastReturns[t] = StrategyReturn[t - 1]
+```
+
+This ensures that the strategy selected for the current period cannot use that period's realised return.
+
+## Dynamic Strategy Selection
+
+Momentum and mean reversion are compared independently for every asset.
+
+The strategy with the strongest positive score is selected.
+
+For example:
+
+```text
+A Momentum Score        1.3
+A Mean-Reversion Score  0.4
+→ select A momentum
+
+B Momentum Score       -0.2
+B Mean-Reversion Score  0.8
+→ select B mean reversion
+
+C Momentum Score       -0.3
+C Mean-Reversion Score -0.1
+→ select neither
+```
+
+If both strategies have non-positive scores, the asset remains inactive.
+
+Capital is equally divided across active assets.
+
+For example:
+
+```text
+A active
+B active
+C inactive
+
+A Weight = 0.5
+B Weight = 0.5
+C Weight = 0
+```
+
+If no asset has a positive selected strategy, the portfolio remains in cash.
+
+The selected strategy return for each asset is:
+
+```text
+SelectedStrategyReturn =
+MomentumSelected × MomentumReturn
++
+MeanReversionSelected × MeanReversionReturn
+```
+
+The portfolio return is then the weighted sum of the selected strategy returns.
+
+## Dynamic Portfolio Turnover
+
+The dynamic portfolio tracks strategy-specific weights such as:
+
+```text
+A_MomentumWeight
+A_MeanReversionWeight
+```
+
+This allows turnover to capture both asset rebalancing and changes between strategies.
+
+Previous strategy weights are adjusted for their realised returns:
+
+```text
+DriftedWeight[t] =
+PreviousWeight × (1 + PreviousStrategyReturn)
+/
+(1 + PreviousPortfolioReturn)
+```
+
+Turnover is then calculated from the difference between the drifted previous allocation and the new target allocation.
+
+This means that switching from momentum to mean reversion requires exiting one strategy allocation and entering the other.
+
+Dynamic transaction costs are deducted before net portfolio performance is calculated.
+
+The reported statistics include:
+
+- Gross portfolio return
+- Net portfolio return
+- Annualised return
+- Annualised volatility
+- Sharpe ratio
+- Maximum drawdown
+- Total turnover
+- Total transaction cost
+- Time in the market
+
+Run the dynamic portfolio with:
+
+```bash
+python -m src.dynamic_portfolio
+```
+
+The results are saved to:
+
+`output/dynamic_portfolio_results.csv`
+
+The dynamic allocator currently expects momentum and mean-reversion return streams to have already been generated.
+
+A later integration step will connect the existing strategy and walk-forward pipelines directly to the dynamic portfolio.
+
 ## Project Structure
 
 ```text
 quant-project/
 ├── data/
 │   ├── prices.csv
-│   └── pair_prices.csv
+│   ├── pair_prices.csv
+│   ├── portfolio_prices.csv
+│   └── dynamic_strategy_returns.csv
 ├── output/
 │   ├── analysed_prices.csv
 │   ├── momentum_results.csv
 │   ├── mean_reversion_results.csv
-│   └── pair_results.csv
+│   ├── pair_results.csv
+│   ├── portfolio_results.csv
+│   └── dynamic_portfolio_results.csv
 ├── src/
 │   ├── analyse.py
 │   ├── backtest.py
@@ -751,7 +1007,9 @@ quant-project/
 │   ├── mean_reversion_walk_forward.py
 │   ├── pairs.py
 │   ├── pairs_optimise.py
-│   └── pairs_walk_forward.py
+│   ├── pairs_walk_forward.py
+│   ├── portfolio.py
+│   └── dynamic_portfolio.py
 ├── tests/
 │   ├── test_analyse.py
 │   ├── test_backtest.py
@@ -765,7 +1023,9 @@ quant-project/
 │   ├── test_mean_reversion_walk_forward.py
 │   ├── test_pairs.py
 │   ├── test_pairs_optimise.py
-│   └── test_pairs_walk_forward.py
+│   ├── test_pairs_walk_forward.py
+│   ├── test_portfolio.py
+│   └── test_dynamic_portfolio.py
 ├── .gitignore
 ├── README.md
 └── requirements.txt
@@ -798,6 +1058,9 @@ python -m pytest tests/test_mean_reversion_walk_forward.py -v
 python -m pytest tests/test_pairs.py -v
 python -m pytest tests/test_pairs_optimise.py -v
 python -m pytest tests/test_pairs_walk_forward.py -v
+
+python -m pytest tests/test_portfolio.py -v
+python -m pytest tests/test_dynamic_portfolio.py -v
 ```
 
 The pairs strategy introduces `statsmodels` for the ADF and Engle-Granger cointegration tests.
@@ -807,27 +1070,26 @@ The pairs strategy introduces `statsmodels` for the ADF and Engle-Granger cointe
 The project currently:
 
 - Uses closing prices only
-- Implements single-asset momentum and mean-reversion strategies
-- Implements a two-asset pairs-trading strategy
 - Uses fixed parameter grids supplied by the researcher
 - Uses expanding-window walk-forward evaluation only
-- Uses a simplified proportional transaction-cost model
+- Uses simplified proportional transaction costs
 - Does not model bid-ask spreads
 - Does not model slippage
 - Does not model market impact
-- Does not yet implement general portfolio-level position sizing
-- Does not yet support arbitrary multi-asset portfolios
+- Supports equal and inverse-volatility static portfolio weighting but not general portfolio optimisation
+- Uses equal weighting across active assets in the dynamic portfolio
 - Does not model leverage explicitly
 - Assumes 252 trading periods per year
-- Assumes a zero risk-free rate when calculating the Sharpe ratio
+- Assumes a zero risk-free rate when calculating Sharpe ratios
 - Does not yet perform bootstrap or permutation-based statistical robustness testing
 - Uses OLS to estimate a single linear hedge ratio for pairs trading
-- Does not yet dynamically update the hedge ratio inside an individual test period
-- Uses a simplified pair transaction-cost model based on spread-position turnover rather than detailed trading costs for each individual leg
+- Does not dynamically update the pair hedge ratio inside an individual test period
+- Uses a simplified pair transaction-cost model based on spread-position turnover
+- Requires dynamic strategy-return streams to be generated separately before running the dynamic allocator
 
 There is also a transaction-cost detail at walk-forward boundaries that can be improved.
 
-If the selected strategy parameters change between consecutive walk-forward windows, the first transaction cost in the new window is currently based on the position generated by the newly selected strategy rather than explicitly using the final deployed position from the previous test window.
+If selected strategy parameters change between consecutive walk-forward windows, the first transaction cost in the new window is currently based on the position generated by the newly selected strategy rather than explicitly using the final deployed position from the previous test window.
 
 For pairs trading, the same issue can also arise when the estimated hedge ratio changes between consecutive windows.
 
@@ -841,15 +1103,21 @@ Completed components include:
 Price loading and analysis
 → reusable single-asset backtesting
 → momentum
-→ train-validation-test optimisation
-→ historical warm-up handling
-→ walk-forward evaluation
 → mean reversion
+→ train-validation-test optimisation
+→ historical warm-up and state handling
+→ expanding-window walk-forward evaluation
 → pairs trading
 → regression and hedge-ratio estimation
 → stationarity and cointegration testing
-→ pair optimisation
-→ pair walk-forward evaluation
+→ pair optimisation and walk-forward evaluation
+→ multi-asset return analysis
+→ correlation and covariance analysis
+→ equal and inverse-volatility portfolio weighting
+→ portfolio risk and rebalancing
+→ dynamic per-asset strategy selection
+→ dynamic multi-asset allocation
+→ portfolio turnover and transaction costs
 ```
 
-The next major stages are multi-asset portfolio construction and stronger statistical robustness testing.
+The remaining major stages are integrating the existing strategy pipelines directly into the dynamic portfolio and performing stronger statistical robustness testing.
