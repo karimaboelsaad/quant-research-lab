@@ -3,6 +3,11 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
+from src.metrics import(
+    calculate_cumulative_value,
+    calculate_performance_metrics
+)
+
 
 def calculate_rolling_strategy_scores(df,assets,lookback):
     if df.empty:
@@ -189,7 +194,9 @@ def calculate_dynamic_portfolio_returns(df,assets):
 
         df["DynamicPortfolioReturn"]+=df[weight]*df[selected_return].fillna(0)
 
-    df["DynamicPortfolioCumulativeValue"]=(1+df["DynamicPortfolioReturn"]).cumprod()
+    df["DynamicPortfolioCumulativeValue"]=calculate_cumulative_value(
+        df["DynamicPortfolioReturn"]
+    )
 
     return df
 
@@ -261,7 +268,9 @@ def apply_dynamic_transaction_costs(df,cost_rate):
 
     df["DynamicTransactionCost"]=df["DynamicTurnover"]*cost_rate
     df["NetDynamicPortfolioReturn"]=df["DynamicPortfolioReturn"]-df["DynamicTransactionCost"]
-    df["NetDynamicPortfolioCumulativeValue"]=(1+df["NetDynamicPortfolioReturn"]).cumprod()
+    df["NetDynamicPortfolioCumulativeValue"]=calculate_cumulative_value(
+        df["NetDynamicPortfolioReturn"]
+    )
 
     return df
 
@@ -308,43 +317,26 @@ def calculate_dynamic_portfolio_statistics(df,lookback,cost_rate):
     first_active=np.flatnonzero(active_rows.to_numpy())[0]
     evaluation_df=df.iloc[first_active:].copy()
 
-    observations=len(evaluation_df)
+    core_statistics=calculate_performance_metrics(
+        evaluation_df["NetDynamicPortfolioReturn"]
+    )
 
-    gross_value=(1+evaluation_df["DynamicPortfolioReturn"]).cumprod()
-    net_value=(1+evaluation_df["NetDynamicPortfolioReturn"]).cumprod()
-
-    gross_return=gross_value.iloc[-1]-1
-    net_return=net_value.iloc[-1]-1
-
-    if net_value.iloc[-1]<=0:
-        annualized_return=np.nan
-    else:
-        annualized_return=net_value.iloc[-1]**(252/observations)-1
-
-    daily_volatility=evaluation_df["NetDynamicPortfolioReturn"].std()
-    annualized_volatility=daily_volatility*np.sqrt(252)
-
-    if daily_volatility==0 or pd.isna(daily_volatility):
-        sharpe_ratio=np.nan
-    else:
-        sharpe_ratio=(evaluation_df["NetDynamicPortfolioReturn"].mean()/daily_volatility)*np.sqrt(252)
-
-    running_max=net_value.cummax().clip(lower=1)
-    drawdown=net_value/running_max-1
-    max_drawdown=drawdown.min()
+    gross_cumulative_value=calculate_cumulative_value(
+        evaluation_df["DynamicPortfolioReturn"]
+    )
 
     time_in_market=(evaluation_df["DynamicGrossExposure"]>0).mean()
 
     stats={
         "lookback":lookback,
         "cost_rate":cost_rate,
-        "observations":observations,
-        "gross_portfolio_return":gross_return,
-        "net_portfolio_return":net_return,
-        "annualized_return":annualized_return,
-        "annualized_volatility":annualized_volatility,
-        "sharpe_ratio":sharpe_ratio,
-        "max_drawdown":max_drawdown,
+        "observations":core_statistics["observations"],
+        "gross_portfolio_return":gross_cumulative_value.iloc[-1]-1,
+        "net_portfolio_return":core_statistics["total_return"],
+        "annualised_return":core_statistics["annualised_return"],
+        "annualised_volatility":core_statistics["annualised_volatility"],
+        "sharpe_ratio":core_statistics["sharpe_ratio"],
+        "max_drawdown":core_statistics["max_drawdown"],
         "total_turnover":evaluation_df["DynamicTurnover"].sum(),
         "total_transaction_cost":evaluation_df["DynamicTransactionCost"].sum(),
         "time_in_market":time_in_market
@@ -362,8 +354,8 @@ Transaction cost:        {stats["cost_rate"]:.2%}
 Observations:            {stats["observations"]}
 Gross portfolio return:  {stats["gross_portfolio_return"]:.2%}
 Net portfolio return:    {stats["net_portfolio_return"]:.2%}
-Annualized return:       {stats["annualized_return"]:.2%}
-Annualized volatility:   {stats["annualized_volatility"]:.2%}
+Annualised return:       {stats["annualised_return"]:.2%}
+Annualised volatility:   {stats["annualised_volatility"]:.2%}
 Sharpe ratio:            {stats["sharpe_ratio"]:.2f}
 Maximum drawdown:        {stats["max_drawdown"]:.2%}
 Total turnover:          {stats["total_turnover"]:.2f}

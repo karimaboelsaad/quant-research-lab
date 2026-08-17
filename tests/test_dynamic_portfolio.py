@@ -16,6 +16,8 @@ from src.dynamic_portfolio import(
     save_dynamic_portfolio_output
 )
 
+from src.metrics import calculate_performance_metrics
+
 
 def create_strategy_dataframe():
     return pd.DataFrame({
@@ -269,9 +271,21 @@ def test_calculate_dynamic_portfolio_statistics():
         0.001
     )
 
+    active_rows=df["DynamicGrossExposure"]>0
+    first_active=np.flatnonzero(active_rows.to_numpy())[0]
+    evaluation_df=df.iloc[first_active:]
+
+    core_statistics=calculate_performance_metrics(
+        evaluation_df["NetDynamicPortfolioReturn"]
+    )
+
     assert stats["lookback"]==2
     assert stats["cost_rate"]==pytest.approx(0.001)
-    assert stats["observations"]==3
+    assert stats["observations"]==core_statistics["observations"]
+    assert stats["annualised_return"]==pytest.approx(core_statistics["annualised_return"])
+    assert stats["annualised_volatility"]==pytest.approx(core_statistics["annualised_volatility"])
+    assert stats["sharpe_ratio"]==pytest.approx(core_statistics["sharpe_ratio"])
+    assert stats["max_drawdown"]==pytest.approx(core_statistics["max_drawdown"])
     assert stats["time_in_market"]==pytest.approx(1)
     assert stats["total_turnover"]>=0
     assert stats["total_transaction_cost"]>=0
