@@ -3,7 +3,12 @@ from pathlib import Path
 from statsmodels.tsa.stattools import(
     adfuller,
     coint
-) 
+)
+
+from src.metrics import(
+    calculate_cumulative_value,
+    calculate_performance_metrics
+)
 
 
 def calculate_pair_regression(df):
@@ -11,7 +16,7 @@ def calculate_pair_regression(df):
         raise ValueError(
             "Dataframe cannot be empty."
         )
-    
+
     df=df.copy()
     covariance=df["CloseB"].cov(df["CloseA"])
     b_variance=df["CloseB"].var()
@@ -20,7 +25,7 @@ def calculate_pair_regression(df):
         raise ValueError(
             "B variance cannot be 0."
         )
-    
+
     beta=covariance/b_variance
     alpha=df["CloseA"].mean()-beta*df["CloseB"].mean()
 
@@ -30,12 +35,12 @@ def calculate_pair_regression(df):
     }
 
 
-def calculate_pair_spread(df, alpha, beta):
+def calculate_pair_spread(df,alpha,beta):
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
         )
-    
+
     df=df.copy()
     df["PredictedA"]=alpha+df["CloseB"]*beta
     df["Spread"]=df["CloseA"]-df["PredictedA"]
@@ -43,7 +48,7 @@ def calculate_pair_spread(df, alpha, beta):
     return df
 
 
-def calculate_spread_z_score(df, lookback):
+def calculate_spread_z_score(df,lookback):
     if lookback<=1 or lookback>len(df):
         raise ValueError(
             "Lookback must be at least 2 and no larger than the size of the dataframe."
@@ -58,7 +63,7 @@ def calculate_spread_z_score(df, lookback):
     return df
 
 
-def calculate_pair_signal(df, entry_threshold, exit_threshold):
+def calculate_pair_signal(df,entry_threshold,exit_threshold):
     if entry_threshold<=0:
         raise ValueError(
             "Entry threshold must be positive."
@@ -93,12 +98,12 @@ def calculate_pair_signal(df, entry_threshold, exit_threshold):
     return df
 
 
-def calculate_pair_positions(df, beta):
+def calculate_pair_positions(df,beta):
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
         )
-    
+
     df=df.copy()
     df["SpreadPosition"]=df["Signal"].shift(1).fillna(0)
     df["PositionA"]=df["SpreadPosition"]
@@ -106,38 +111,43 @@ def calculate_pair_positions(df, beta):
 
     return df
 
- 
+
 def calculate_pair_returns(df):
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
         )
-    
+
     df=df.copy()
     df["PairPnL"]=df["PositionA"]*(df["CloseA"]-df["CloseA"].shift(1))+df["PositionB"]*(df["CloseB"]-df["CloseB"].shift(1))
     df["GrossExposure"]=abs(df["PositionA"])*df["CloseA"].shift(1)+abs(df["PositionB"])*df["CloseB"].shift(1)
     df["StrategyReturn"]=df["PairPnL"]/df["GrossExposure"]
     df["StrategyReturn"]=df["StrategyReturn"].fillna(0)
-    df["StrategyCumulativeValue"]=(1+df["StrategyReturn"]).cumprod()
+    df["StrategyCumulativeValue"]=calculate_cumulative_value(
+        df["StrategyReturn"]
+    )
 
     return df
 
 
-def apply_pair_transaction_costs(df, cost_rate):
+def apply_pair_transaction_costs(df,cost_rate):
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
         )
+
     if cost_rate<0:
         raise ValueError(
             "Cost rate cannot be negative."
         )
-    
+
     df=df.copy()
     df["Turnover"]=abs(df["SpreadPosition"]-df["SpreadPosition"].shift(1)).fillna(0)
     df["TransactionCost"]=df["Turnover"]*cost_rate
     df["NetStrategyReturn"]=df["StrategyReturn"]-df["TransactionCost"]
-    df["NetStrategyCumulativeValue"]=(1+df["NetStrategyReturn"]).cumprod()
+    df["NetStrategyCumulativeValue"]=calculate_cumulative_value(
+        df["NetStrategyReturn"]
+    )
 
     return df
 
@@ -168,6 +178,7 @@ def test_spread_stationarity(df):
         "is_stationary":p_value<0.05
     }
 
+
 def test_pair_cointegration(df):
     if df.empty:
         raise ValueError(
@@ -195,8 +206,7 @@ def test_pair_cointegration(df):
     }
 
 
-
-def run_pair_strategy(df, alpha, beta, lookback, entry_threshold, exit_threshold, cost_rate):
+def run_pair_strategy(df,alpha,beta,lookback,entry_threshold,exit_threshold,cost_rate):
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
@@ -220,44 +230,33 @@ def calculate_pair_statistics(df):
             "Dataframe cannot be empty."
         )
 
-    observations=len(df)
+    core_statistics=calculate_performance_metrics(
+        df["NetStrategyReturn"]
+    )
 
-    gross_return=df["StrategyCumulativeValue"].iloc[-1]-1
-    net_return=df["NetStrategyCumulativeValue"].iloc[-1]-1
-
-    annualised_return=(1+net_return)**(252/observations)-1
-
-    daily_volatility=df["NetStrategyReturn"].std()
-    annualised_volatility=daily_volatility*(252**0.5)
-
-    if daily_volatility==0:
-        sharpe_ratio=0
-    else:
-        sharpe_ratio=(df["NetStrategyReturn"].mean()/daily_volatility)*(252**0.5)
-
-    running_max=df["NetStrategyCumulativeValue"].cummax()
-    drawdown=df["NetStrategyCumulativeValue"]/running_max-1
-    max_drawdown=drawdown.min()
+    gross_cumulative_value=calculate_cumulative_value(
+        df["StrategyReturn"]
+    )
 
     total_turnover=df["Turnover"].sum()
     trade_events=(df["SpreadPosition"].diff().fillna(0)!=0).sum()
     time_in_market=(df["SpreadPosition"]!=0).mean()
 
     return {
-        "observations":observations,
-        "gross_return":gross_return,
-        "net_return":net_return,
-        "annualised_return":annualised_return,
-        "annualised_volatility":annualised_volatility,
-        "sharpe_ratio":sharpe_ratio,
-        "max_drawdown":max_drawdown,
+        "observations":core_statistics["observations"],
+        "gross_return":gross_cumulative_value.iloc[-1]-1,
+        "net_return":core_statistics["total_return"],
+        "annualised_return":core_statistics["annualised_return"],
+        "annualised_volatility":core_statistics["annualised_volatility"],
+        "sharpe_ratio":core_statistics["sharpe_ratio"],
+        "max_drawdown":core_statistics["max_drawdown"],
         "total_turnover":total_turnover,
         "trade_events":trade_events,
         "time_in_market":time_in_market
     }
 
 
-def calculate_pair_strategy_statistics(df, alpha, beta, lookback, entry_threshold, exit_threshold, cost_rate):
+def calculate_pair_strategy_statistics(df,alpha,beta,lookback,entry_threshold,exit_threshold,cost_rate):
     stats=calculate_pair_statistics(df)
 
     stationarity=test_spread_stationarity(df)
