@@ -5,8 +5,8 @@ import pytest
 from src.metrics import(
     validate_returns,
     calculate_cumulative_value,
-    calculate_annualized_return,
-    calculate_annualized_volatility,
+    calculate_annualised_return,
+    calculate_annualised_volatility,
     calculate_sharpe_ratio,
     calculate_drawdown,
     calculate_max_drawdown,
@@ -95,7 +95,7 @@ def test_calculate_annualized_return():
     cumulative_value=(1.01*1.02*0.99)
     expected=(cumulative_value**(252/3))-1
 
-    result=calculate_annualized_return(returns)
+    result=calculate_annualised_return(returns)
 
     assert np.isclose(result,expected)
 
@@ -105,7 +105,7 @@ def test_calculate_annualized_volatility():
 
     expected=returns.std()*np.sqrt(252)
 
-    result=calculate_annualized_volatility(returns)
+    result=calculate_annualised_volatility(returns)
 
     assert np.isclose(result,expected)
 
@@ -113,7 +113,7 @@ def test_calculate_annualized_volatility():
 def test_calculate_annualized_volatility_single_observation_is_nan():
     returns=pd.Series([0.01])
 
-    result=calculate_annualized_volatility(returns)
+    result=calculate_annualised_volatility(returns)
 
     assert np.isnan(result)
 
@@ -185,12 +185,12 @@ def test_calculate_performance_metrics():
         (1.01*0.98*1.03)-1
     )
     assert np.isclose(
-        statistics["annualized_return"],
-        calculate_annualized_return(returns)
+        statistics["annualised_return"],
+        calculate_annualised_return(returns)
     )
     assert np.isclose(
-        statistics["annualized_volatility"],
-        calculate_annualized_volatility(returns)
+        statistics["annualised_volatility"],
+        calculate_annualised_volatility(returns)
     )
     assert np.isclose(
         statistics["sharpe_ratio"],
@@ -210,8 +210,8 @@ def test_performance_metrics_use_canonical_keys():
     assert set(statistics.keys())=={
         "observations",
         "total_return",
-        "annualized_return",
-        "annualized_volatility",
+        "annualised_return",
+        "annualised_volatility",
         "sharpe_ratio",
         "max_drawdown"
     }

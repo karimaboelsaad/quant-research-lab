@@ -46,19 +46,19 @@ def calculate_cumulative_value(returns):
     return cumulative_value
 
 
-def calculate_annualized_return(returns):
+def calculate_annualised_return(returns):
     returns=validate_returns(returns)
 
     observations=len(returns)
     cumulative_value=calculate_cumulative_value(returns)
     final_value=cumulative_value.iloc[-1]
 
-    annualized_return=(final_value**(PERIODS_PER_YEAR/observations))-1
+    annualised_return=(final_value**(PERIODS_PER_YEAR/observations))-1
 
-    return annualized_return
+    return annualised_return
 
 
-def calculate_annualized_volatility(returns):
+def calculate_annualised_volatility(returns):
     returns=validate_returns(returns)
 
     daily_volatility=returns.std()
@@ -66,9 +66,9 @@ def calculate_annualized_volatility(returns):
     if pd.isna(daily_volatility):
         return np.nan
 
-    annualized_volatility=daily_volatility*np.sqrt(PERIODS_PER_YEAR)
+    annualised_volatility=daily_volatility*np.sqrt(PERIODS_PER_YEAR)
 
-    return annualized_volatility
+    return annualised_volatility
 
 
 def calculate_sharpe_ratio(returns):
@@ -111,8 +111,8 @@ def calculate_performance_metrics(returns):
     statistics={
         "observations":len(returns),
         "total_return":cumulative_value.iloc[-1]-INITIAL_NAV,
-        "annualized_return":calculate_annualized_return(returns),
-        "annualized_volatility":calculate_annualized_volatility(returns),
+        "annualised_return":calculate_annualised_return(returns),
+        "annualised_volatility":calculate_annualised_volatility(returns),
         "sharpe_ratio":calculate_sharpe_ratio(returns),
         "max_drawdown":calculate_max_drawdown(returns)
     }
