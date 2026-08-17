@@ -1,17 +1,35 @@
 import pandas as pd
 import numpy as np
 
+from src.data import(
+    calculate_price_returns,
+    load_multi_asset_prices
+)
+
+from src.metrics import(
+    calculate_cumulative_value,
+    calculate_performance_metrics
+)
+
+
 def calculate_asset_returns(df):
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
         )
-    
-    df=df.copy()
-    asset_columns=[column for column in df.columns if column!="Date"]
 
-    for column in asset_columns:
-        df[f"{column}Return"]=df[column].pct_change()
+    asset_columns=[
+        column
+        for column in df.columns
+        if column!="Date"
+    ]
+
+    if len(asset_columns)<2:
+        raise ValueError(
+            "Dataframe must contain at least 2 asset price columns."
+        )
+
+    df=calculate_price_returns(df,asset_columns)
 
     return df
 
@@ -21,7 +39,7 @@ def calculate_correlation_matrix(df):
         raise ValueError(
             "Dataframe cannot be empty."
         )
-    
+
     df=df.copy()
     return_columns=[column for column in df.columns if column.endswith("Return")]
 
@@ -29,9 +47,9 @@ def calculate_correlation_matrix(df):
         raise ValueError(
             "There must be at least 2 return columns."
         )
-    
+
     corr_matrix=df[return_columns].corr()
-   
+
     return corr_matrix
 
 
@@ -40,7 +58,7 @@ def calculate_covariance_matrix(df):
         raise ValueError(
             "Dataframe cannot be empty."
         )
-    
+
     df=df.copy()
     return_columns=[column for column in df.columns if column.endswith("Return")]
 
@@ -48,9 +66,9 @@ def calculate_covariance_matrix(df):
         raise ValueError(
             "There must be at least 2 return columns."
         )
-    
+
     cov_matrix=df[return_columns].cov()
-   
+
     return cov_matrix
 
 
@@ -59,7 +77,7 @@ def calculate_equal_weights(df):
         raise ValueError(
             "Dataframe cannot be empty."
         )
-    
+
     df=df.copy()
     return_columns=[column for column in df.columns if column.endswith("Return")]
 
@@ -67,16 +85,16 @@ def calculate_equal_weights(df):
         raise ValueError(
             "There must be at least 2 return columns."
         )
-    
+
     portfolio_weights={}
 
     for column in return_columns:
         portfolio_weights[column]=1/len(return_columns)
-    
+
     return portfolio_weights
 
 
-def calculate_portfolio_returns(df, portfolio_weights):
+def calculate_portfolio_returns(df,portfolio_weights):
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
@@ -102,15 +120,17 @@ def calculate_portfolio_returns(df, portfolio_weights):
 
     df["PortfolioReturn"]=0.0
 
-    for column, weight in portfolio_weights.items():
+    for column,weight in portfolio_weights.items():
         df["PortfolioReturn"]+=df[column].fillna(0)*weight
 
-    df["PortfolioCumulativeValue"]=(1+df["PortfolioReturn"]).cumprod()
+    df["PortfolioCumulativeValue"]=calculate_cumulative_value(
+        df["PortfolioReturn"]
+    )
 
     return df
 
 
-def calculate_portfolio_volatility(cov_matrix, portfolio_weights):
+def calculate_portfolio_volatility(cov_matrix,portfolio_weights):
     if cov_matrix.empty:
         raise ValueError(
             "Covariance matrix cannot be empty."
@@ -141,7 +161,6 @@ def calculate_portfolio_volatility(cov_matrix, portfolio_weights):
     portfolio_volatility=np.sqrt(portfolio_variance)
 
     return portfolio_volatility
-
 
 
 def calculate_inverse_volatility_weights(df):
@@ -179,8 +198,7 @@ def calculate_inverse_volatility_weights(df):
     return portfolio_weights
 
 
-
-def calculate_rebalancing_turnover(df, portfolio_weights):
+def calculate_rebalancing_turnover(df,portfolio_weights):
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
@@ -211,7 +229,7 @@ def calculate_rebalancing_turnover(df, portfolio_weights):
 
     df["Turnover"]=0.0
 
-    for column, weight in portfolio_weights.items():
+    for column,weight in portfolio_weights.items():
         drifted_weight=weight*(1+df[column].fillna(0))/(1+df["PortfolioReturn"])
 
         df["Turnover"]+=abs(weight-drifted_weight)
@@ -219,8 +237,7 @@ def calculate_rebalancing_turnover(df, portfolio_weights):
     return df
 
 
-
-def apply_portfolio_transaction_costs(df, cost_rate):
+def apply_portfolio_transaction_costs(df,cost_rate):
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
@@ -240,7 +257,9 @@ def apply_portfolio_transaction_costs(df, cost_rate):
 
     df["TransactionCost"]=df["Turnover"]*cost_rate
     df["NetPortfolioReturn"]=df["PortfolioReturn"]-df["TransactionCost"]
-    df["NetPortfolioCumulativeValue"]=(1+df["NetPortfolioReturn"]).cumprod()
+    df["NetPortfolioCumulativeValue"]=calculate_cumulative_value(
+        df["NetPortfolioReturn"]
+    )
 
     return df
 
@@ -266,64 +285,36 @@ def calculate_portfolio_statistics(df):
                 f"Dataframe must contain {column}."
             )
 
-    observations=len(df)
+    core_statistics=calculate_performance_metrics(
+        df["NetPortfolioReturn"]
+    )
 
-    gross_return=df["PortfolioCumulativeValue"].iloc[-1]-1
-    net_return=df["NetPortfolioCumulativeValue"].iloc[-1]-1
-
-    annualized_return=(df["NetPortfolioCumulativeValue"].iloc[-1]**(252/observations))-1
-
-    daily_volatility=df["NetPortfolioReturn"].std()
-    annualized_volatility=daily_volatility*np.sqrt(252)
-
-    if daily_volatility==0 or pd.isna(daily_volatility):
-        sharpe_ratio=np.nan
-    else:
-        sharpe_ratio=(df["NetPortfolioReturn"].mean()/daily_volatility)*np.sqrt(252)
-
-    running_max=df["NetPortfolioCumulativeValue"].cummax()
-    drawdown=df["NetPortfolioCumulativeValue"]/running_max-1
-    max_drawdown=drawdown.min()
+    gross_cumulative_value=calculate_cumulative_value(
+        df["PortfolioReturn"]
+    )
 
     statistics={
-        "Observations":observations,
-        "GrossReturn":gross_return,
-        "NetReturn":net_return,
-        "AnnualizedReturn":annualized_return,
-        "AnnualizedVolatility":annualized_volatility,
-        "SharpeRatio":sharpe_ratio,
-        "MaxDrawdown":max_drawdown,
-        "TotalTurnover":df["Turnover"].sum(),
-        "TotalTransactionCost":df["TransactionCost"].sum()
+        "observations":core_statistics["observations"],
+        "gross_portfolio_return":gross_cumulative_value.iloc[-1]-1,
+        "net_portfolio_return":core_statistics["total_return"],
+        "annualised_return":core_statistics["annualised_return"],
+        "annualised_volatility":core_statistics["annualised_volatility"],
+        "sharpe_ratio":core_statistics["sharpe_ratio"],
+        "max_drawdown":core_statistics["max_drawdown"],
+        "total_turnover":df["Turnover"].sum(),
+        "total_transaction_cost":df["TransactionCost"].sum()
     }
 
     return statistics
 
 
 def load_portfolio_prices(path):
-    df=pd.read_csv(path)
-
-    if df.empty:
-        raise ValueError(
-            "Dataframe cannot be empty."
-        )
-
-    if "Date" not in df.columns:
-        raise ValueError(
-            "Dataframe must contain Date."
-        )
-
-    if len(df.columns)<3:
-        raise ValueError(
-            "Dataframe must contain at least 2 asset price columns."
-        )
-
-    df["Date"]=pd.to_datetime(df["Date"])
+    df=load_multi_asset_prices(path)
 
     return df
 
 
-def save_portfolio_output(df, path):
+def save_portfolio_output(df,path):
     df.to_csv(path,index=False)
 
 

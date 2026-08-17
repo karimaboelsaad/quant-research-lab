@@ -17,6 +17,8 @@ from src.portfolio import(
     save_portfolio_output
 )
 
+from src.metrics import calculate_performance_metrics
+
 
 def test_calculate_asset_returns():
     df=pd.DataFrame({
@@ -259,14 +261,31 @@ def test_calculate_portfolio_statistics():
     })
 
     result=calculate_portfolio_statistics(df)
+    core_statistics=calculate_performance_metrics(net_returns)
 
-    assert result["Observations"]==3
-    assert result["GrossReturn"]==pytest.approx(df["PortfolioCumulativeValue"].iloc[-1]-1)
-    assert result["NetReturn"]==pytest.approx(df["NetPortfolioCumulativeValue"].iloc[-1]-1)
-    assert result["TotalTurnover"]==pytest.approx(0.3)
-    assert result["TotalTransactionCost"]==pytest.approx(0.0003)
-    assert not pd.isna(result["SharpeRatio"])
-
+    assert result["observations"]==3
+    assert result["gross_portfolio_return"]==pytest.approx(
+        (1+portfolio_returns).prod()-1
+    )
+    assert result["net_portfolio_return"]==pytest.approx(
+        core_statistics["total_return"]
+    )
+    assert result["annualised_return"]==pytest.approx(
+        core_statistics["annualised_return"]
+    )
+    assert result["annualised_volatility"]==pytest.approx(
+        core_statistics["annualised_volatility"]
+    )
+    assert result["sharpe_ratio"]==pytest.approx(
+        core_statistics["sharpe_ratio"]
+    )
+    assert result["max_drawdown"]==pytest.approx(
+        core_statistics["max_drawdown"]
+    )
+    assert result["total_turnover"]==pytest.approx(turnover.sum())
+    assert result["total_transaction_cost"]==pytest.approx(
+        transaction_cost.sum()
+    )
 
 def test_load_portfolio_prices(tmp_path):
     filepath=tmp_path/"portfolio_prices.csv"

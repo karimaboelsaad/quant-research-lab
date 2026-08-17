@@ -184,7 +184,7 @@ def test_mean_reversion_walk_forward_returns_risk_statistics():
         "annualised_return",
         "annualised_volatility",
         "sharpe_ratio",
-        "maximum_drawdown"
+        "max_drawdown"
     ]
 
     for statistic in required_statistics:
