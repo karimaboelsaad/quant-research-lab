@@ -1,0 +1,68 @@
+{
+  "project": {
+    "name": "quant-research-system",
+    "primary_hypothesis": "The lagged dynamic portfolio improves risk-adjusted net OOS performance over its static and standalone baselines.",
+    "annualisation_periods": 252,
+    "random_seed": 20260820
+  },
+  "data": {
+    "provider": "Yahoo Finance via yfinance",
+    "start_date": "2010-01-01",
+    "end_date": "2026-01-01",
+    "multi_asset_tickers": ["SPY", "TLT", "GLD"],
+    "pair_tickers": ["KO", "PEP"],
+    "single_asset_ticker": "SPY",
+    "single_asset_path": "data/research/prices.csv",
+    "multi_asset_path": "data/research/portfolio_prices.csv",
+    "pair_path": "data/research/pair_prices.csv",
+    "adjusted_prices": true,
+    "calendar_policy": "intersection"
+  },
+  "walk_forward": {
+    "initial_train_size": 1000,
+    "validation_size": 252,
+    "test_size": 126,
+    "include_partial_final_window": false
+  },
+  "momentum": {
+    "lookbacks": [20, 60, 120, 252],
+    "top_candidates": 2,
+    "cost_rate": 0.001
+  },
+  "mean_reversion": {
+    "lookbacks": [20, 60, 120],
+    "entry_thresholds": [-1.0, -1.5, -2.0],
+    "exit_thresholds": [0.0, 0.5],
+    "top_candidates": 3,
+    "cost_rate": 0.001
+  },
+  "pairs": {
+    "lookbacks": [20, 60, 120],
+    "entry_thresholds": [1.0, 1.5, 2.0],
+    "exit_thresholds": [0.0, 0.5],
+    "top_candidates": 3,
+    "cost_rate": 0.001,
+    "selection_policy": "predefined_pair"
+  },
+  "portfolio": {
+    "cost_rate": 0.001,
+    "inverse_volatility_estimation": "pre_oos_frozen"
+  },
+  "dynamic": {
+    "score_lookback": 60,
+    "overlay_cost_rate": 0.001
+  },
+  "execution": {
+    "decision_time": "close_t",
+    "execution_assumption": "idealized_close_t",
+    "return_interval": "close_t_to_close_t_plus_1"
+  },
+  "robustness": {
+    "bootstrap_resamples": 5000,
+    "confidence_level": 0.95,
+    "cost_rates": [0.0, 0.0005, 0.001, 0.002]
+  },
+  "reporting": {
+    "minimum_oos_observations": 100
+  }
+}

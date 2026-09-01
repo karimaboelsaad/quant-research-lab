@@ -21,6 +21,9 @@ htmlcov/
 # Generated output
 output/
 
+# Downloaded personal-use research data
+data/research/
+
 # macOS files
 .DS_Store
 
