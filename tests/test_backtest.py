@@ -307,3 +307,23 @@ def test_run_backtest_is_deterministic():
 def test_statistics_rejects_empty_dataframe():
     with pytest.raises(ValueError,match="Cannot calculate statistics"):
         calculate_backtest_statistics(pd.DataFrame())
+
+
+
+def test_transaction_costs_use_previous_execution_position():
+    df=pd.DataFrame({
+        "Position":[1,1],
+        "StrategyReturn":[0.02,0.01]
+    })
+
+    result=calculate_transaction_costs(df,0.001,previous_position=0)
+
+    assert result["Turnover"].tolist()==pytest.approx([
+        1.0,
+        0.0
+    ])
+
+    assert result["TransactionCost"].tolist()==pytest.approx([
+        0.001,
+        0.0
+    ])

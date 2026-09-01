@@ -10,6 +10,7 @@ from src.portfolio import(
     calculate_portfolio_returns,
     calculate_portfolio_volatility,
     calculate_inverse_volatility_weights,
+    calculate_pre_oos_inverse_volatility_weights,
     calculate_rebalancing_turnover,
     apply_portfolio_transaction_costs,
     calculate_portfolio_statistics,
@@ -192,6 +193,21 @@ def test_calculate_inverse_volatility_weights_rejects_zero_volatility():
         calculate_inverse_volatility_weights(df)
 
 
+def test_pre_oos_inverse_volatility_weights_ignore_future_returns():
+    original=pd.DataFrame({
+        "AReturn":[0.01,-0.01,0.02,-0.02,0.01,0.02],
+        "BReturn":[0.005,-0.005,0.01,-0.01,0.005,0.01]
+    })
+    changed_future=original.copy()
+    changed_future.loc[4:,"AReturn"]=[0.50,-0.50]
+    changed_future.loc[4:,"BReturn"]=[-0.40,0.40]
+
+    original_weights=calculate_pre_oos_inverse_volatility_weights(original,4)
+    changed_weights=calculate_pre_oos_inverse_volatility_weights(changed_future,4)
+
+    assert changed_weights==pytest.approx(original_weights)
+
+
 def test_calculate_rebalancing_turnover():
     df=pd.DataFrame({
         "AReturn":[0,0.10],
@@ -212,7 +228,7 @@ def test_calculate_rebalancing_turnover():
         abs(0.5-(0.5/1.05))
     )
 
-    assert result["Turnover"].iloc[0]==pytest.approx(0)
+    assert result["Turnover"].iloc[0]==pytest.approx(1)
     assert result["Turnover"].iloc[1]==pytest.approx(expected)
 
 

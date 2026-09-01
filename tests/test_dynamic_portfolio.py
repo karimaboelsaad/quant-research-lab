@@ -322,6 +322,20 @@ def test_load_dynamic_strategy_returns_rejects_duplicate_dates(tmp_path):
         load_dynamic_strategy_returns(filepath,["A"])
 
 
+@pytest.mark.parametrize("invalid_return",[None,"bad",np.inf,-np.inf,-1.0])
+def test_load_dynamic_strategy_returns_rejects_invalid_returns(tmp_path,invalid_return):
+    filepath=tmp_path/"dynamic_strategy_returns.csv"
+
+    pd.DataFrame({
+        "Date":["2024-01-01","2024-01-02"],
+        "A_MomentumReturn":[0.01,invalid_return],
+        "A_MeanReversionReturn":[0.01,0.02]
+    }).to_csv(filepath,index=False)
+
+    with pytest.raises(ValueError):
+        load_dynamic_strategy_returns(filepath,["A"])
+
+
 def test_save_dynamic_portfolio_output(tmp_path,monkeypatch):
     monkeypatch.chdir(tmp_path)
 

@@ -146,6 +146,39 @@ def validate_aligned_dates(dataframes,date_column="Date"):
     return validated_dataframes
 
 
+def validate_return_data(df,return_columns,date_column="Date"):
+    df=validate_dates(df,date_column)
+
+    if not return_columns:
+        raise ValueError(
+            "At least one return column is required."
+        )
+
+    missing_columns=[column for column in return_columns if column not in df.columns]
+
+    if missing_columns:
+        raise ValueError(f"Missing return columns: {missing_columns}")
+
+    df=df.copy()
+
+    for column in return_columns:
+        if df[column].isna().any():
+            raise ValueError(f"{column} cannot contain missing returns.")
+
+        try:
+            df[column]=pd.to_numeric(df[column],errors="raise").astype(float)
+        except (ValueError,TypeError):
+            raise ValueError(f"{column} must contain numeric returns.") from None
+
+        if not np.isfinite(df[column].to_numpy()).all():
+            raise ValueError(f"{column} must contain finite returns.")
+
+        if (df[column]<=-1).any():
+            raise ValueError(f"{column} returns must be greater than -100%.")
+
+    return df
+
+
 def calculate_price_returns(df,price_columns,return_columns=None,date_column="Date"):
     df=validate_price_data(df,price_columns,date_column)
 

@@ -24,7 +24,12 @@ def fake_strategy_result(df):
     df=df.copy()
 
     df["StrategyReturn"]=0.01
-    df["NetStrategyReturn"]=0.005
+    df["PositionA"]=0.0
+    df["PositionB"]=0.0
+    df["SpreadPosition"]=0.0
+    df["PreviousCloseA"]=df["CloseA"].shift(1)
+    df["PreviousCloseB"]=df["CloseB"].shift(1)
+    df["NetStrategyReturn"]=df["StrategyReturn"]
     df["StrategyCumulativeValue"]=(1+df["StrategyReturn"]).cumprod()
     df["NetStrategyCumulativeValue"]=(1+df["NetStrategyReturn"]).cumprod()
 
@@ -71,8 +76,10 @@ def test_evaluate_pair_period_uses_pre_period_regression(monkeypatch):
 
     assert captured["length"]==4
     assert len(result)==2
+    assert result["RegressionAlpha"].tolist()==[1,1]
+    assert result["RegressionBeta"].tolist()==[2,2]
     assert result["StrategyCumulativeValue"].iloc[0]==pytest.approx(1.01)
-    assert result["NetStrategyCumulativeValue"].iloc[0]==pytest.approx(1.005)
+    assert result["NetStrategyCumulativeValue"].iloc[0]==pytest.approx(1.01)
 
 
 def test_evaluate_pair_training_period_uses_training_data_for_regression(monkeypatch):
@@ -173,11 +180,11 @@ def test_evaluate_pair_parameters_on_period(monkeypatch):
         4,
         [5,10],
         [1,2],
-        [0.5,2.5],
+        [0.25,0.5],
         0.001
     )
 
-    assert len(result)==4
+    assert len(result)==8
 
     assert set(result.columns)=={
         "Lookback",
@@ -187,6 +194,13 @@ def test_evaluate_pair_parameters_on_period(monkeypatch):
     }
 
     assert (result["ExitThreshold"]<result["EntryThreshold"]).all()
+
+
+def test_evaluate_pair_parameters_rejects_invalid_grid():
+    df=make_pair_df()
+
+    with pytest.raises(ValueError,match="smaller than every entry"):
+        evaluate_pair_parameters_on_period(df,0,4,[2,3],[1,2],[0.5,1],0.001)
 
 
 def test_select_top_pair_parameters():
@@ -285,7 +299,7 @@ def test_run_pair_optimisation(monkeypatch):
     test_df=df.iloc[6:]
 
     training_results=pd.DataFrame({
-        "Lookback":[5,10],
+        "Lookback":[2,3],
         "EntryThreshold":[1,2],
         "ExitThreshold":[0.5,1],
         "NetStrategyReturn":[0.1,0.2]
@@ -294,14 +308,14 @@ def test_run_pair_optimisation(monkeypatch):
     candidate_parameters=training_results.iloc[[1]].copy()
 
     validation_results=pd.DataFrame({
-        "Lookback":[10],
+        "Lookback":[3],
         "EntryThreshold":[2],
         "ExitThreshold":[1],
         "NetStrategyReturn":[0.3]
     })
 
     best_parameters={
-        "Lookback":10,
+        "Lookback":3,
         "EntryThreshold":2,
         "ExitThreshold":1
     }
@@ -359,9 +373,9 @@ def test_run_pair_optimisation(monkeypatch):
 
     result=run_pair_optimisation(
         df,
-        [5,10],
+        [2,3],
         [1,2],
-        [0.5,1],
+        [0,0.5],
         1,
         0.001
     )

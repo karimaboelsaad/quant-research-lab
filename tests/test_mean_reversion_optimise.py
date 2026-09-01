@@ -73,6 +73,19 @@ def test_evaluate_mean_reversion_period_preserves_previous_state():
     assert period_result.iloc[0]["Position"]==full_result.loc[10,"Position"]
 
 
+def test_evaluate_mean_reversion_period_uses_actual_previous_position():
+    df=make_long_dataframe()
+
+    from_cash=evaluate_mean_reversion_period(df,10,20,3,-1.0,0.0,0.001,previous_position=0)
+
+    from_long=evaluate_mean_reversion_period(df,10,20,3,-1.0,0.0,0.001,previous_position=1)
+
+    desired_position=from_cash["Position"].iloc[0]
+
+    assert from_cash["Turnover"].iloc[0]==pytest.approx(abs(desired_position-0))
+    assert from_long["Turnover"].iloc[0]==pytest.approx(abs(desired_position-1))
+
+
 def test_evaluate_mean_reversion_period_does_not_modify_input():
     df=make_long_dataframe()
 

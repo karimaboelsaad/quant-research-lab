@@ -5,6 +5,7 @@ from src.metrics import(
 
 
 def calculate_positions(df):
+    """Delay each signal so today's information can only earn tomorrow's return."""
     df=df.copy()
 
     df["Position"]=df["Signal"].shift(1).fillna(0).astype(int)
@@ -21,7 +22,7 @@ def calculate_strategy_returns(df):
     return df
 
 
-def calculate_transaction_costs(df,cost_rate):
+def calculate_transaction_costs(df,cost_rate,previous_position=0):
     if cost_rate<0:
         raise ValueError(
             "The transaction cost rate cannot be negative."
@@ -29,7 +30,9 @@ def calculate_transaction_costs(df,cost_rate):
 
     df=df.copy()
 
-    df["Turnover"]=(df["Position"]-df["Position"].shift(1).fillna(0)).abs()
+    previous_positions=df["Position"].shift(1,fill_value=previous_position)
+
+    df["Turnover"]=(df["Position"]-previous_positions).abs()
     df["TransactionCost"]=df["Turnover"]*cost_rate
     df["NetStrategyReturn"]=df["StrategyReturn"]-df["TransactionCost"]
     df["NetStrategyCumulativeValue"]=calculate_cumulative_value(df["NetStrategyReturn"])

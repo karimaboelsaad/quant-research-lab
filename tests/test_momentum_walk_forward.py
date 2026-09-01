@@ -184,6 +184,20 @@ def test_run_momentum_walk_forward_combines_test_periods_in_order():
     assert combined.index.is_unique
 
 
+def test_walk_forward_boundary_turnover_uses_prior_actual_position():
+    df=make_long_dataframe()
+
+    result=run_momentum_walk_forward(df,lookbacks=[1,2,3],n=2,cost_rate=0.001,initial_train_size=20,validation_size=5,test_size=5)
+
+    combined=result["combined_test_results"].reset_index(drop=True)
+
+    for boundary in [5,10]:
+        previous_position=combined.loc[boundary-1,"Position"]
+        current_position=combined.loc[boundary,"Position"]
+
+        assert combined.loc[boundary,"Turnover"]==pytest.approx(abs(current_position-previous_position))
+
+
 def test_run_momentum_walk_forward_recalculates_cumulative_values():
     df=make_long_dataframe()
 

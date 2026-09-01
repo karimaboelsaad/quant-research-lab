@@ -1,11 +1,15 @@
 import pandas as pd
 
-from src.backtest import calculate_backtest_statistics
+from src.backtest import(
+    calculate_backtest_statistics,
+    calculate_transaction_costs
+)
 from src.mean_reversion import run_mean_reversion
 from src.split import split_data
+from src.walk_forward import calculate_common_training_start
 
 
-def evaluate_mean_reversion_period(df, start_position, end_position, lookback, entry_threshold, exit_threshold, cost_rate):
+def evaluate_mean_reversion_period(df,start_position,end_position,lookback,entry_threshold,exit_threshold,cost_rate,previous_position=0):
     if not 0<=start_position<end_position<=len(df):
         raise ValueError(
             "The start position needs at least 0 and smaller than the end position which needs to be at most the size of the dataframe."
@@ -16,6 +20,10 @@ def evaluate_mean_reversion_period(df, start_position, end_position, lookback, e
     df=run_mean_reversion(df,lookback,entry_threshold,exit_threshold,cost_rate)
 
     df=df.iloc[start_position:].copy()
+
+    # The prefix restores the stateful signal at the evaluation boundary, but
+    # only the previous live OOS holding determines the first executable trade.
+    df=calculate_transaction_costs(df,cost_rate,previous_position)
 
     df["CumulativeValue"]=(1+df["DailyReturn"].fillna(0)).cumprod()
     df["StrategyCumulativeValue"]=(1+df["StrategyReturn"]).cumprod()
@@ -106,8 +114,9 @@ def run_mean_reversion_optimisation(df, lookbacks, entry_thresholds, exit_thresh
 
     train_end=len(train_df)
     validation_end=train_end+len(validation_df)
+    training_start=calculate_common_training_start(lookbacks,train_end)
 
-    training_results=evaluate_mean_reversion_parameters_on_period(df,0,train_end,lookbacks,entry_thresholds,exit_thresholds,cost_rate)
+    training_results=evaluate_mean_reversion_parameters_on_period(df,training_start,train_end,lookbacks,entry_thresholds,exit_thresholds,cost_rate)
 
     candidate_parameters=select_top_mean_reversion_parameters(training_results,n)
 

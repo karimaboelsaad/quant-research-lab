@@ -143,6 +143,20 @@ def test_mean_reversion_walk_forward_combines_test_periods_in_order():
     assert combined.index.is_unique
 
 
+def test_mean_reversion_boundary_turnover_uses_prior_actual_position():
+    df=make_long_dataframe()
+
+    result=run_mean_reversion_walk_forward(df,[2,3],[-1.5,-1.0],[0.0,0.5],2,0.001,20,5,5)
+
+    combined=result["combined_test_results"].reset_index(drop=True)
+
+    for boundary in [5,10]:
+        previous_position=combined.loc[boundary-1,"Position"]
+        current_position=combined.loc[boundary,"Position"]
+
+        assert combined.loc[boundary,"Turnover"]==pytest.approx(abs(current_position-previous_position))
+
+
 def test_mean_reversion_walk_forward_recalculates_cumulative_values():
     df=make_long_dataframe()
 

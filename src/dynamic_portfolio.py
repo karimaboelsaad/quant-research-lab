@@ -8,8 +8,24 @@ from src.metrics import(
     calculate_performance_metrics
 )
 
+from src.data import validate_return_data
+
+
+def validate_dynamic_strategy_returns(df,assets):
+    if not assets:
+        raise ValueError(
+            "Assets cannot be empty."
+        )
+
+    return_columns=[]
+
+    for asset in assets:
+        return_columns+=[f"{asset}_MomentumReturn",f"{asset}_MeanReversionReturn"]
+
+    return validate_return_data(df,return_columns)
 
 def calculate_rolling_strategy_scores(df,assets,lookback):
+    """Score only past returns so a strategy cannot select itself with today's result."""
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
@@ -276,6 +292,7 @@ def apply_dynamic_transaction_costs(df,cost_rate):
 
 
 def run_dynamic_portfolio(df,assets,lookback,cost_rate):
+    df=validate_dynamic_strategy_returns(df,assets)
     df=calculate_rolling_strategy_scores(df,assets,lookback)
     df=select_best_strategy_per_asset(df,assets)
     df=calculate_selected_strategy_returns(df,assets)
@@ -367,36 +384,9 @@ Time in market:          {stats["time_in_market"]:.2%}
 def load_dynamic_strategy_returns(filepath,assets):
     df=pd.read_csv(filepath)
 
-    if df.empty:
-        raise ValueError(
-            "Dataframe cannot be empty."
-        )
-
-    if "Date" not in df.columns:
-        raise ValueError(
-            "Dataframe must contain Date."
-        )
-
-    for asset in assets:
-        momentum_return=f"{asset}_MomentumReturn"
-        mean_reversion_return=f"{asset}_MeanReversionReturn"
-
-        if momentum_return not in df.columns or mean_reversion_return not in df.columns:
-            raise ValueError(
-                "Every asset must have momentum and mean reversion return columns."
-            )
-
-    df["Date"]=pd.to_datetime(df["Date"])
-
-    if df["Date"].duplicated().any():
-        raise ValueError(
-            "Dates cannot contain duplicates."
-        )
-
-    df=df.sort_values("Date").reset_index(drop=True)
+    df=validate_dynamic_strategy_returns(df,assets)
 
     return df
-
 
 def save_dynamic_portfolio_output(df,assets):
     output_path=Path("output/dynamic_portfolio_results.csv")

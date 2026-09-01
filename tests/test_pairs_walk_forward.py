@@ -11,7 +11,7 @@ from src.pairs_walk_forward import(
 
 def test_run_pair_walk_forward_window(monkeypatch):
     df=pd.DataFrame({
-        "CloseA":range(20,40),
+        "CloseA":[20+i+(i%3)*0.2 for i in range(20)],
         "CloseB":range(10,30)
     })
 
@@ -22,7 +22,7 @@ def test_run_pair_walk_forward_window(monkeypatch):
     }
 
     training_results=pd.DataFrame({
-        "Lookback":[5,10],
+        "Lookback":[5,9],
         "EntryThreshold":[1,2],
         "ExitThreshold":[0.5,1],
         "NetStrategyReturn":[0.1,0.2]
@@ -31,14 +31,14 @@ def test_run_pair_walk_forward_window(monkeypatch):
     candidate_parameters=training_results.iloc[[1]].copy()
 
     validation_results=pd.DataFrame({
-        "Lookback":[10],
+        "Lookback":[9],
         "EntryThreshold":[2],
         "ExitThreshold":[1],
         "NetStrategyReturn":[0.3]
     })
 
     best_parameters={
-        "Lookback":10,
+        "Lookback":9,
         "EntryThreshold":2,
         "ExitThreshold":1
     }
@@ -49,7 +49,9 @@ def test_run_pair_walk_forward_window(monkeypatch):
         "StrategyCumulativeValue":[1.01,1.0302],
         "NetStrategyCumulativeValue":[1.009,1.028171],
         "Turnover":[0,1],
-        "SpreadPosition":[0,1]
+        "SpreadPosition":[0,1],
+        "PositionA":[0,1],
+        "PositionB":[0,-2]
     })
 
     captured={}
@@ -78,12 +80,14 @@ def test_run_pair_walk_forward_window(monkeypatch):
         lambda *args:best_parameters
     )
 
-    def fake_evaluate_period(df, start_position, end_position, lookback, entry_threshold, exit_threshold, cost_rate):
+    def fake_evaluate_period(df,start_position,end_position,lookback,entry_threshold,exit_threshold,cost_rate,previous_position_a,previous_position_b):
         captured["start_position"]=start_position
         captured["end_position"]=end_position
         captured["lookback"]=lookback
         captured["entry_threshold"]=entry_threshold
         captured["exit_threshold"]=exit_threshold
+        captured["previous_position_a"]=previous_position_a
+        captured["previous_position_b"]=previous_position_b
 
         return test_results
 
@@ -102,18 +106,20 @@ def test_run_pair_walk_forward_window(monkeypatch):
     result=run_pair_walk_forward_window(
         df,
         window,
-        [5,10],
+        [5,9],
         [1,2],
-        [0.5,1],
+        [0,0.5],
         1,
         0.001
     )
 
     assert captured["start_position"]==15
     assert captured["end_position"]==20
-    assert captured["lookback"]==10
+    assert captured["lookback"]==9
     assert captured["entry_threshold"]==2
     assert captured["exit_threshold"]==1
+    assert captured["previous_position_a"]==0
+    assert captured["previous_position_b"]==0
 
     assert result["best_parameters"]==best_parameters
     assert result["test_results"].equals(test_results)
@@ -141,12 +147,16 @@ def test_run_pair_walk_forward(monkeypatch):
 
     first_test=pd.DataFrame({
         "StrategyReturn":[0.01,0.02],
-        "NetStrategyReturn":[0.009,0.019]
+        "NetStrategyReturn":[0.009,0.019],
+        "PositionA":[0.0,1.0],
+        "PositionB":[0.0,-2.0]
     })
 
     second_test=pd.DataFrame({
         "StrategyReturn":[-0.01,0.03],
-        "NetStrategyReturn":[-0.011,0.029]
+        "NetStrategyReturn":[-0.011,0.029],
+        "PositionA":[1.0,0.0],
+        "PositionB":[-3.0,0.0]
     })
 
     window_results=[
@@ -165,8 +175,10 @@ def test_run_pair_walk_forward(monkeypatch):
     )
 
     call_count={"value":0}
+    previous_positions=[]
 
     def fake_window(*args):
+        previous_positions.append(args[-2:])
         result=window_results[call_count["value"]]
         call_count["value"]+=1
 
@@ -212,6 +224,7 @@ def test_run_pair_walk_forward(monkeypatch):
     assert combined["NetStrategyCumulativeValue"].iloc[-1]==pytest.approx(expected_net)
 
     assert result["statistics"]["observations"]==4
+    assert previous_positions==[(0,0),(1.0,-2.0)]
 
 
 def test_run_pair_walk_forward_passes_window_sizes(monkeypatch):
@@ -248,7 +261,9 @@ def test_run_pair_walk_forward_passes_window_sizes(monkeypatch):
         lambda *args:{
             "test_results":pd.DataFrame({
                 "StrategyReturn":[0],
-                "NetStrategyReturn":[0]
+                "NetStrategyReturn":[0],
+                "PositionA":[0],
+                "PositionB":[0]
             })
         }
     )

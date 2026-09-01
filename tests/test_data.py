@@ -10,6 +10,7 @@ from src.data import(
     validate_pair_prices,
     validate_multi_asset_prices,
     validate_aligned_dates,
+    validate_return_data,
     calculate_price_returns
 )
 
@@ -253,6 +254,29 @@ def test_validate_aligned_dates_requires_two_dataframes():
 
     with pytest.raises(ValueError):
         validate_aligned_dates([df])
+
+
+def test_validate_return_data_sorts_and_converts_returns():
+    df=pd.DataFrame({
+        "Date":["2024-01-02","2024-01-01"],
+        "StrategyReturn":["0.02","0.01"]
+    })
+
+    result=validate_return_data(df,["StrategyReturn"])
+
+    assert result["Date"].tolist()==pd.to_datetime(["2024-01-01","2024-01-02"]).tolist()
+    assert result["StrategyReturn"].tolist()==pytest.approx([0.01,0.02])
+
+
+@pytest.mark.parametrize("invalid_return",[None,"bad",np.inf,-np.inf,-1.0,-1.5])
+def test_validate_return_data_rejects_invalid_returns(invalid_return):
+    df=pd.DataFrame({
+        "Date":["2024-01-01","2024-01-02"],
+        "StrategyReturn":[0.01,invalid_return]
+    })
+
+    with pytest.raises(ValueError):
+        validate_return_data(df,["StrategyReturn"])
 
 
 def test_calculate_price_returns_single_asset():

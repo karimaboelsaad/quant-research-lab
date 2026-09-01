@@ -154,8 +154,14 @@ def test_calculate_pair_returns():
 
 
 def test_apply_pair_transaction_costs():
+    spread_position=pd.Series([0,1,1,0,-1,1],dtype=float)
+
     df=pd.DataFrame({
-        "SpreadPosition":[0,1,1,0,-1,1],
+        "SpreadPosition":spread_position,
+        "PositionA":spread_position,
+        "PositionB":spread_position*-2,
+        "PreviousCloseA":[100]*6,
+        "PreviousCloseB":[50]*6,
         "StrategyReturn":[0,0,0,0,0,0]
     })
 
@@ -171,6 +177,45 @@ def test_apply_pair_transaction_costs():
     assert result["TransactionCost"].iloc[1]==pytest.approx(0.001)
     assert result["TransactionCost"].iloc[5]==pytest.approx(0.002)
     assert result["NetStrategyReturn"].iloc[5]==pytest.approx(-0.002)
+
+
+def test_pair_turnover_charges_beta_rebalance():
+    df=pd.DataFrame({
+        "PositionA":[1.0],
+        "PositionB":[-2.0],
+        "PreviousCloseA":[100.0],
+        "PreviousCloseB":[50.0],
+        "StrategyReturn":[0.0]
+    })
+
+    result=apply_pair_transaction_costs(df,0.001,previous_position_a=1.0,previous_position_b=-1.0)
+
+    expected_turnover=(2/3-1/2)+(1/2-1/3)
+
+    assert result["Turnover"].iloc[0]==pytest.approx(expected_turnover)
+    assert result["TransactionCost"].iloc[0]==pytest.approx(expected_turnover*0.001)
+
+
+@pytest.mark.parametrize(
+    "previous_a,previous_b,current_a,current_b,expected_turnover",
+    [
+        (0,0,1,-2,1.0),
+        (1,-2,0,0,1.0),
+        (1,-2,-1,2,2.0)
+    ]
+)
+def test_pair_leg_turnover_convention(previous_a,previous_b,current_a,current_b,expected_turnover):
+    df=pd.DataFrame({
+        "PositionA":[current_a],
+        "PositionB":[current_b],
+        "PreviousCloseA":[100.0],
+        "PreviousCloseB":[50.0],
+        "StrategyReturn":[0.0]
+    })
+
+    result=apply_pair_transaction_costs(df,0.001,previous_position_a=previous_a,previous_position_b=previous_b)
+
+    assert result["Turnover"].iloc[0]==pytest.approx(expected_turnover)
 
 
 def test_spread_stationarity(monkeypatch):

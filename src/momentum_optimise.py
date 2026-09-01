@@ -1,11 +1,16 @@
 import pandas as pd
 
-from src.backtest import calculate_backtest_statistics
+from src.backtest import(
+    calculate_backtest_statistics,
+    calculate_transaction_costs
+)
+
 from src.momentum import run_momentum
 from src.split import split_data
+from src.walk_forward import calculate_common_training_start
 
 
-def evaluate_momentum_period(df, start_position, end_position, lookback, cost_rate):
+def evaluate_momentum_period(df,start_position,end_position,lookback,cost_rate,previous_position=0):
     if lookback<=0:
         raise ValueError(
             "Lookback must be positive."
@@ -26,6 +31,11 @@ def evaluate_momentum_period(df, start_position, end_position, lookback, cost_ra
 
     period_results=context_results.iloc[warmup_rows:].copy()
 
+    # Warm-up determines the desired position at the boundary, but it does not
+    # represent capital that was actually deployed. Recalculate costs only on
+    # the evaluated rows using the real position carried into the period.
+    period_results=calculate_transaction_costs(period_results,cost_rate,previous_position)
+
     period_results["CumulativeValue"]=(1+period_results["DailyReturn"].fillna(0)).cumprod()
     period_results["StrategyCumulativeValue"]=(1+period_results["StrategyReturn"]).cumprod()
     period_results["NetStrategyCumulativeValue"]=(1+period_results["NetStrategyReturn"]).cumprod()
@@ -33,11 +43,12 @@ def evaluate_momentum_period(df, start_position, end_position, lookback, cost_ra
     return period_results
 
 
-def evaluate_lookbacks_on_period(df, start_position, end_position, lookbacks, cost_rate):
+def evaluate_lookbacks_on_period(df,start_position,end_position,lookbacks,cost_rate):
     results=[]
 
     for lookback in lookbacks:
         strategy_df=evaluate_momentum_period(df,start_position,end_position,lookback,cost_rate)
+
         stats=calculate_backtest_statistics(strategy_df)
 
         results.append({
@@ -59,7 +70,7 @@ def select_best_lookback(df):
     return int(df.loc[index,"Lookback"])
 
 
-def select_top_lookbacks(df, n):
+def select_top_lookbacks(df,n):
     if df.empty:
         raise ValueError(
             "Cannot select lookbacks from empty results."
@@ -76,18 +87,20 @@ def select_top_lookbacks(df, n):
         )
 
     top_results=df.sort_values("NetStrategyReturn",ascending=False).head(n)
+
     lookbacks=top_results["Lookback"].astype(int).tolist()
 
     return lookbacks
 
 
-def run_momentum_optimisation(df, lookbacks, n, cost_rate, train_ratio=0.6, validation_ratio=0.2):
-    train_df, validation_df, _=split_data(df,train_ratio,validation_ratio)
+def run_momentum_optimisation(df,lookbacks,n,cost_rate,train_ratio=0.6,validation_ratio=0.2):
+    train_df,validation_df,_=split_data(df,train_ratio,validation_ratio)
 
     train_end=len(train_df)
     validation_end=train_end+len(validation_df)
+    training_start=calculate_common_training_start(lookbacks,train_end)
 
-    training_results=evaluate_lookbacks_on_period(df,0,train_end,lookbacks,cost_rate)
+    training_results=evaluate_lookbacks_on_period(df,training_start,train_end,lookbacks,cost_rate)
 
     candidate_lookbacks=select_top_lookbacks(training_results,n)
 

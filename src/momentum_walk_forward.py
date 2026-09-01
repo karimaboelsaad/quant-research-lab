@@ -9,15 +9,16 @@ from src.momentum_optimise import(
     select_best_lookback
 )
 
-from src.walk_forward import generate_walk_forward_windows
+from src.walk_forward import calculate_common_training_start,generate_walk_forward_windows
 
 
-def run_momentum_walk_forward_window(df, window, lookbacks, n, cost_rate):
+def run_momentum_walk_forward_window(df,window,lookbacks,n,cost_rate,previous_position=0):
     train_end=window["train_end"]
     validation_end=window["validation_end"]
     test_end=window["test_end"]
+    training_start=calculate_common_training_start(lookbacks,train_end)
 
-    training_results=evaluate_lookbacks_on_period(df,0,train_end,lookbacks,cost_rate)
+    training_results=evaluate_lookbacks_on_period(df,training_start,train_end,lookbacks,cost_rate)
 
     candidate_lookbacks=select_top_lookbacks(training_results,n)
 
@@ -25,7 +26,7 @@ def run_momentum_walk_forward_window(df, window, lookbacks, n, cost_rate):
 
     best_lookback=select_best_lookback(validation_results)
 
-    test_results=evaluate_momentum_period(df,validation_end,test_end,best_lookback,cost_rate)
+    test_results=evaluate_momentum_period(df,validation_end,test_end,best_lookback,cost_rate,previous_position)
 
     test_statistics=calculate_backtest_statistics(test_results)
 
@@ -44,12 +45,14 @@ def run_momentum_walk_forward(df, lookbacks, n, cost_rate, initial_train_size, v
 
     test_periods=[]
     full_results=[]
+    previous_position=0
 
     for window in windows:
-        result=run_momentum_walk_forward_window(df,window,lookbacks,n,cost_rate)
+        result=run_momentum_walk_forward_window(df,window,lookbacks,n,cost_rate,previous_position)
 
         full_results.append(result)
         test_periods.append(result["test_results"])
+        previous_position=int(result["test_results"]["Position"].iloc[-1])
 
     combined_test_results=pd.concat(test_periods)
 

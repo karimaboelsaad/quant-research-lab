@@ -108,7 +108,7 @@ def test_evaluate_period_preserves_initial_trade_cost():
     assert first_row["TransactionCost"]==pytest.approx(0.001)
 
 
-def test_evaluate_period_preserves_position_continuity():
+def test_evaluate_period_uses_previous_execution_position():
     df=make_prepared_dataframe([
         100,
         100,
@@ -120,13 +120,12 @@ def test_evaluate_period_preserves_position_continuity():
         130
     ])
 
-    result=evaluate_momentum_period(df,start_position=5,end_position=8,lookback=2,cost_rate=0.001)
+    result=evaluate_momentum_period(df,start_position=5,end_position=8,lookback=2,cost_rate=0.001,previous_position=1)
 
     first_row=result.iloc[0]
 
     assert first_row["Position"]==1
     assert first_row["Turnover"]==pytest.approx(0.0)
-    assert first_row["TransactionCost"]==pytest.approx(0.0)
 
 
 def test_evaluate_period_returns_only_requested_rows():
@@ -524,3 +523,13 @@ def test_run_momentum_optimisation_rejects_too_many_candidates():
 
     with pytest.raises(ValueError,match="n cannot exceed"):
         run_momentum_optimisation(df,lookbacks=[1,2],n=3,cost_rate=0.001)
+
+
+def test_evaluate_momentum_period_starts_from_cash():
+    df=make_long_dataframe()
+
+    result=evaluate_momentum_period(df,10,20,2,0.001)
+
+    first_position=result["Position"].iloc[0]
+
+    assert result["Turnover"].iloc[0]==pytest.approx(abs(first_position-0))

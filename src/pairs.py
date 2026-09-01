@@ -9,9 +9,11 @@ from src.metrics import(
     calculate_cumulative_value,
     calculate_performance_metrics
 )
+from src.data import load_pair_prices
 
 
 def calculate_pair_regression(df):
+    """Fit the spread relationship on the history supplied by the caller."""
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
@@ -113,14 +115,17 @@ def calculate_pair_positions(df,beta):
 
 
 def calculate_pair_returns(df):
+    """Convert two-leg price P&L into returns using prior gross exposure."""
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
         )
 
     df=df.copy()
-    df["PairPnL"]=df["PositionA"]*(df["CloseA"]-df["CloseA"].shift(1))+df["PositionB"]*(df["CloseB"]-df["CloseB"].shift(1))
-    df["GrossExposure"]=abs(df["PositionA"])*df["CloseA"].shift(1)+abs(df["PositionB"])*df["CloseB"].shift(1)
+    df["PreviousCloseA"]=df["CloseA"].shift(1)
+    df["PreviousCloseB"]=df["CloseB"].shift(1)
+    df["PairPnL"]=df["PositionA"]*(df["CloseA"]-df["PreviousCloseA"])+df["PositionB"]*(df["CloseB"]-df["PreviousCloseB"])
+    df["GrossExposure"]=abs(df["PositionA"])*df["PreviousCloseA"]+abs(df["PositionB"])*df["PreviousCloseB"]
     df["StrategyReturn"]=df["PairPnL"]/df["GrossExposure"]
     df["StrategyReturn"]=df["StrategyReturn"].fillna(0)
     df["StrategyCumulativeValue"]=calculate_cumulative_value(
@@ -130,7 +135,29 @@ def calculate_pair_returns(df):
     return df
 
 
-def apply_pair_transaction_costs(df,cost_rate):
+def _normalise_leg_notionals(position_a,position_b,price_a,price_b):
+    if position_a==0 and position_b==0:
+        return 0.0,0.0
+
+    if pd.isna(price_a) or pd.isna(price_b):
+        raise ValueError(
+            "Previous leg prices are required for a non-flat pair position."
+        )
+
+    gross_notional=abs(position_a)*price_a+abs(position_b)*price_b
+
+    if gross_notional<=0:
+        raise ValueError(
+            "Pair gross notional must be positive."
+        )
+
+    return (
+        position_a*price_a/gross_notional,
+        position_b*price_b/gross_notional
+    )
+
+
+def apply_pair_transaction_costs(df,cost_rate,previous_position_a=0,previous_position_b=0):
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
@@ -141,8 +168,51 @@ def apply_pair_transaction_costs(df,cost_rate):
             "Cost rate cannot be negative."
         )
 
+    required_columns=[
+        "PositionA",
+        "PositionB",
+        "PreviousCloseA",
+        "PreviousCloseB",
+        "StrategyReturn"
+    ]
+
+    for column in required_columns:
+        if column not in df.columns:
+            raise ValueError(
+                f"Dataframe must contain {column}."
+            )
+
     df=df.copy()
-    df["Turnover"]=abs(df["SpreadPosition"]-df["SpreadPosition"].shift(1)).fillna(0)
+
+    prior_positions_a=df["PositionA"].shift(
+        1,
+        fill_value=previous_position_a
+    )
+    prior_positions_b=df["PositionB"].shift(
+        1,
+        fill_value=previous_position_b
+    )
+
+    current_weights=[]
+    previous_weights=[]
+    turnover=[]
+
+    for row_position,(_,row) in enumerate(df.iterrows()):
+        current_weight=_normalise_leg_notionals(row["PositionA"],row["PositionB"],row["PreviousCloseA"],row["PreviousCloseB"])
+        previous_weight=_normalise_leg_notionals(prior_positions_a.iloc[row_position],prior_positions_b.iloc[row_position],row["PreviousCloseA"],row["PreviousCloseB"])
+
+        current_weights.append(current_weight)
+        previous_weights.append(previous_weight)
+        turnover.append(
+            abs(current_weight[0]-previous_weight[0])
+            +abs(current_weight[1]-previous_weight[1])
+        )
+
+    df["LegWeightA"]=[weight[0] for weight in current_weights]
+    df["LegWeightB"]=[weight[1] for weight in current_weights]
+    df["PreviousLegWeightA"]=[weight[0] for weight in previous_weights]
+    df["PreviousLegWeightB"]=[weight[1] for weight in previous_weights]
+    df["Turnover"]=turnover
     df["TransactionCost"]=df["Turnover"]*cost_rate
     df["NetStrategyReturn"]=df["StrategyReturn"]-df["TransactionCost"]
     df["NetStrategyCumulativeValue"]=calculate_cumulative_value(
@@ -239,7 +309,7 @@ def calculate_pair_statistics(df):
     )
 
     total_turnover=df["Turnover"].sum()
-    trade_events=(df["SpreadPosition"].diff().fillna(0)!=0).sum()
+    trade_events=(df["Turnover"]>0).sum()
     time_in_market=(df["SpreadPosition"]!=0).mean()
 
     return {
@@ -344,8 +414,7 @@ def main():
     exit_threshold=0.5
     cost_rate=0.001
 
-    df=pd.read_csv(filepath)
-    df["Date"]=pd.to_datetime(df["Date"])
+    df=load_pair_prices(filepath)
 
     regression=calculate_pair_regression(df)
 

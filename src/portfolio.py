@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from pathlib import Path
 
 from src.data import(
     calculate_price_returns,
@@ -198,7 +199,19 @@ def calculate_inverse_volatility_weights(df):
     return portfolio_weights
 
 
+def calculate_pre_oos_inverse_volatility_weights(df,oos_start_position):
+    if not 1<oos_start_position<len(df):
+        raise ValueError(
+            "OOS start must leave at least two prior rows and one OOS row."
+        )
+
+    estimation_df=df.iloc[:oos_start_position].copy()
+
+    return calculate_inverse_volatility_weights(estimation_df)
+
+
 def calculate_rebalancing_turnover(df,portfolio_weights):
+    """Measure trades from drifted holdings back to fixed target weights."""
     if df.empty:
         raise ValueError(
             "Dataframe cannot be empty."
@@ -233,6 +246,8 @@ def calculate_rebalancing_turnover(df,portfolio_weights):
         drifted_weight=weight*(1+df[column].fillna(0))/(1+df["PortfolioReturn"])
 
         df["Turnover"]+=abs(weight-drifted_weight)
+
+    df.loc[df.index[0],"Turnover"]=sum(abs(weight) for weight in portfolio_weights.values())
 
     return df
 
@@ -315,6 +330,8 @@ def load_portfolio_prices(path):
 
 
 def save_portfolio_output(df,path):
+    path=Path(path)
+    path.parent.mkdir(parents=True,exist_ok=True)
     df.to_csv(path,index=False)
 
 

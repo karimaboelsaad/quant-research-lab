@@ -42,3 +42,30 @@ def generate_walk_forward_windows(number_of_rows, initial_train_size, validation
         })
 
     return results
+
+
+def calculate_common_training_start(lookbacks,train_end):
+    if not lookbacks:
+        raise ValueError(
+            "Lookbacks cannot be empty."
+        )
+
+    if any(not isinstance(lookback,int) or isinstance(lookback,bool) or lookback<=0 for lookback in lookbacks):
+        raise ValueError(
+            "Lookbacks must contain positive integers."
+        )
+
+    common_start=max(lookbacks)
+
+    if common_start>=train_end:
+        raise ValueError(
+            "Training period must extend beyond the largest lookback."
+        )
+
+    return common_start
+
+
+def calculate_unused_walk_forward_rows(number_of_rows,initial_train_size,validation_size,test_size):
+    windows=generate_walk_forward_windows(number_of_rows,initial_train_size,validation_size,test_size)
+
+    return number_of_rows-windows[-1]["test_end"]
