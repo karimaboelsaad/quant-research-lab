@@ -1,1123 +1,243 @@
-# Quant Project
+# Chronological Quant Research System
 
-This project analyses historical closing-price data and tests momentum, mean-reversion, and pairs-trading strategies.
+This project asks a simple question: can several trading ideas be selected without future information, tested repeatedly out of sample, and combined into a dynamic portfolio that improves on simpler alternatives after costs?
 
-It loads and validates price data, calculates returns, runs backtests with transaction costs, performs chronological train-validation-test optimisation, evaluates strategies using expanding-window walk-forward testing, and combines strategy returns through static and dynamic multi-asset portfolio construction.
+The answer from the frozen final experiment is **no**. That is the useful result. The dynamic allocator was mildly profitable before costs, but frequent strategy switching created enough turnover to make it substantially worse than equal-weight and inverse-volatility baselines.
 
-The momentum and mean-reversion strategies operate on a single asset. The pairs strategy studies the statistical relationship between two assets and trades deviations in their estimated spread.
+## Thirty-second summary
 
-## Input Data
+- Daily adjusted-close data for SPY, TLT, GLD, KO, and PEP from 2010 through 2025.
+- Momentum and mean-reversion strategies on SPY, TLT, and GLD.
+- A separate KO/PEP pairs strategy with pre-test-frozen regressions.
+- Expanding chronological train/validation/test windows with actual positions carried across test boundaries.
+- A dynamic allocator whose score is lagged by one day and built only from walk-forward test returns.
+- Separate underlying strategy costs and dynamic allocation-overlay costs.
+- Frozen cost sensitivity, stationary-bootstrap intervals, and a block timing-placebo test.
+- One command produces all final tables, four figures, a report, and a reproducibility manifest.
+- 354 automated tests.
 
-### Single-Asset Data
+## Final result
 
-Momentum, mean reversion, and the basic price analyser use:
+The primary common out-of-sample period is 23 March 2015 through 31 December 2025. Results below include the configured 10-basis-point cost per unit of gross-notional turnover.
 
-`data/prices.csv`
+| System | Net return | Annual return | Volatility | Sharpe | Max drawdown |
+|---|---:|---:|---:|---:|---:|
+| Dynamic portfolio | -33.26% | -3.69% | 8.24% | -0.41 | -45.34% |
+| Equal weight | 146.44% | 8.74% | 9.48% | 0.93 | -22.86% |
+| Frozen inverse volatility | 139.15% | 8.44% | 9.45% | 0.90 | -23.51% |
+| GLD momentum | 143.96% | 8.64% | 12.36% | 0.73 | -21.58% |
+| SPY momentum | 73.67% | 5.26% | 12.72% | 0.47 | -31.58% |
+| KO/PEP pairs (separate OOS period) | -14.31% | -1.39% | 5.84% | -0.21 | -26.20% |
 
-It must contain at least three rows and two columns named `Date` and `Close`.
+The dynamic portfolio returned 21.73% with trading costs set to zero, but returned -33.26% at the frozen 10-basis-point assumption. Its total gross-notional turnover was 600.74, of which 511.24 came from the allocation overlay. In other words, the selection rule traded far too often for its weak pre-cost edge.
 
-Example:
+The primary stationary-bootstrap interval for the dynamic Sharpe was **[-1.05, 0.20]**. The block timing-placebo p-value was **0.896**, so the observed timing was not stronger than the broken-timing null. The primary hypothesis was not supported.
 
-```csv
-Date,Close
-2024-01-01,100
-2024-01-02,105
-2024-01-03,110
+![Common OOS performance and drawdown](reports/figures/oos_performance.png)
+
+![Robustness checks](reports/figures/robustness.png)
+
+A negative result is not hidden or tuned away here. The purpose of the project is the research process: causal timing, chronological selection, cost accounting, reproducibility, and an honest conclusion.
+
+## How the system fits together
+
+```mermaid
+flowchart TD
+    A["Validated adjusted price panels"] --> B["Frozen configuration"]
+    B --> C["Momentum walk-forward"]
+    B --> D["Mean-reversion walk-forward"]
+    C --> E["Standardized OOS streams"]
+    D --> E
+    E --> F["Lagged dynamic selection"]
+    F --> G["Dynamic OOS portfolio"]
+    B --> H["Equal-weight and frozen inverse-volatility baselines"]
+    I["KO/PEP adjusted prices"] --> J["Separate pair walk-forward"]
+    G --> K["Common metrics and cost decomposition"]
+    H --> K
+    J --> K
+    K --> L["Bootstrap, timing placebo, and sensitivities"]
+    L --> M["Tables, figures, report, and manifest"]
 ```
 
-Dates must be valid, closing prices must be positive numbers, and duplicate dates are not allowed.
+Pairs remain separate because a beta-changing two-leg spread does not fit cleanly into the long/cash per-asset sleeve allocator. Combining them properly would require an asset-level holdings and netting engine, which is outside this project’s scope.
 
-The rows do not need to be ordered because the program sorts them automatically.
+## Preventing look-ahead bias
 
-### Pair Data
+Four rules matter most:
 
-Pairs trading uses:
+1. **Signals are delayed.** Information observed on day `t` creates the position that earns the `t` to `t+1` return.
+2. **Warm-up is not performance.** Earlier rows may calculate rolling state, but only the requested validation or test rows are scored.
+3. **Selection is chronological.** Training ranks the grid, validation selects among the surviving candidates, and the following test window is untouched by that selection.
+4. **Dynamic inputs are OOS-only.** The final allocator accepts standardized walk-forward test streams, aligns their dates, shifts its rolling score, and begins the primary comparison only after its 60-day warm-up.
 
-`data/pair_prices.csv`
+At every new test window, the chosen parameter may imply a different desired position. Turnover is calculated against the actual position carried from the previous test window, not against a hypothetical position generated by replaying the newly selected rule through old data.
 
-The file contains two aligned closing-price series:
+## Methodology
 
-```csv
-Date,CloseA,CloseB
-2024-01-01,101,50
-2024-01-02,103,51
-2024-01-03,106,52
-```
+### Walk-forward design
 
-`CloseA` is treated as the dependent asset and `CloseB` as the explanatory asset when estimating the pair regression.
+The frozen configuration uses an expanding history:
 
-Both prices must correspond to the same date so that the relationship between the assets can be calculated correctly.
+- initial training: 1,000 observations;
+- validation: 252 observations;
+- test: 126 observations;
+- 22 complete test windows;
+- incomplete trailing rows are excluded and recorded in the run manifest.
 
-### Portfolio Data
+Momentum tests lookbacks of 20, 60, 120, and 252 days. Mean reversion tests lookbacks of 20, 60, and 120 days with predeclared entry and exit thresholds. Training keeps only the configured top candidates; validation chooses among those exact candidates rather than inventing a new parameter combination.
 
-Static portfolio analysis uses:
+![Walk-forward stability](reports/figures/walk_forward_stability.png)
 
-`data/portfolio_prices.csv`
+### Strategies
 
-The file must contain a `Date` column and at least two asset price columns.
-
-Example:
-
-```csv
-Date,A,B,C
-2024-01-01,100,80,150
-2024-01-02,102,79,151
-2024-01-03,101,81,152
-```
-
-Dynamic portfolio allocation currently uses:
-
-`data/dynamic_strategy_returns.csv`
-
-which contains previously generated momentum and mean-reversion return streams for several assets.
-
-Example columns include:
+Momentum is long when the lookback return is positive and otherwise holds cash:
 
 ```text
-Date
-A_MomentumReturn
-A_MeanReversionReturn
-B_MomentumReturn
-B_MeanReversionReturn
+lookback_return[t] = price[t] / price[t-lookback] - 1
+position[t+1] = 1 if lookback_return[t] > 0 else 0
 ```
 
-## Price Analyser
+Mean reversion uses a rolling price z-score and a stateful entry/exit rule. It enters after a sufficiently negative deviation and remains invested until the exit threshold is crossed.
 
-The basic price analyser is located in `src/analyse.py`.
+Pairs models:
 
-It calculates:
+```text
+CloseA = alpha + beta * CloseB + spread
+```
 
-- Daily returns
-- Cumulative value
-- Running maximum
-- Drawdown
-- Annualised volatility
+Alpha and beta are estimated only from rows available before the evaluated validation or test period. Pair P&L uses both legs, normalizes by previous gross exposure, and charges turnover when either normalized leg changes. KO/PEP is predefined; pre-test cointegration diagnostics are reported as evidence and are not used to replace the pair after viewing OOS performance.
 
-Run it from the project root with:
+### Portfolios and costs
+
+The static baselines are equal weight and inverse volatility. Inverse-volatility weights are estimated from pre-OOS returns and frozen before evaluation.
+
+For each asset, the dynamic allocator compares the lagged 60-day risk-adjusted scores of its momentum and mean-reversion OOS streams. It selects the stronger positive score, divides capital equally across active assets, and holds unused capital in cash.
+
+![Dynamic allocation](reports/figures/dynamic_allocation.png)
+
+The cost model is deliberately simple:
+
+```text
+cost[t] = gross_notional_turnover[t] * cost_rate
+net_return[t] = gross_return[t] - cost[t]
+```
+
+Candidate trading costs and the extra allocation-overlay cost are stored separately. This is a sleeve abstraction, not exact single-account netting, so some switches may be charged conservatively at both layers.
+
+### Robustness
+
+The final run includes:
+
+- 5,000 stationary-bootstrap resamples for daily mean return and Sharpe;
+- half, primary, and double expected block-length variants;
+- a fixed random seed recorded in the manifest;
+- one aligned block timing-placebo test;
+- frozen-policy costs at 0, 5, 10, and 20 basis points;
+- parameter selection frequency and validation rank summaries;
+- return, volatility, turnover, cost, activity, and profit-concentration summaries for every test window.
+
+The cost sensitivity never re-optimizes parameters or recalculates allocation decisions. Only the cost charged to the already frozen positions and weights changes.
+
+## Reproduce the project
+
+Python 3.11–3.13 is supported.
 
 ```bash
-python src/analyse.py
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-The processed data is saved to:
-
-`output/analysed_prices.csv`
-
-## Backtesting Engine
-
-The reusable single-asset backtesting logic is located in `src/backtest.py`.
-
-Each single-asset strategy first creates a `Signal` column. The backtesting engine then:
-
-1. Delays signals to create positions
-2. Calculates gross strategy returns
-3. Measures position turnover
-4. Applies transaction costs
-5. Calculates net strategy returns
-6. Calculates cumulative portfolio values
-7. Produces performance and risk statistics
-
-Signals are delayed by one period:
-
-```text
-Position[t] = Signal[t - 1]
-```
-
-This prevents a strategy from using information from the current period to earn the current period's return.
-
-The reported statistics include:
-
-- Buy-and-hold return
-- Gross strategy return
-- Net strategy return
-- Annualised return
-- Annualised volatility
-- Sharpe ratio
-- Maximum drawdown
-- Total turnover
-- Number of trade events
-- Time in the market
-
-Annualised calculations assume 252 trading periods per year.
-
-The Sharpe ratio currently assumes a risk-free rate of zero.
-
-Keeping the backtesting logic separate allows the single-asset strategies to use the same engine without repeating the calculations.
-
-Pairs trading uses separate two-leg return calculations because one spread position represents simultaneous positions in two assets.
-
-## Momentum Strategy
-
-The momentum strategy is located in `src/momentum.py`.
-
-It compares the current closing price with the price from a chosen number of periods earlier.
-
-The lookback return is:
-
-```text
-LookbackReturn = CurrentPrice / PreviousPrice - 1
-```
-
-When the lookback return is positive, the strategy holds the asset. Otherwise, it stays in cash.
-
-The complete momentum strategy is handled by:
-
-`run_momentum()`
-
-Run the strategy with:
+Download fresh adjusted-price inputs:
 
 ```bash
-python -m src.momentum
+python download_data.py
 ```
 
-The results are saved to:
-
-`output/momentum_results.csv`
-
-## Momentum Warm-Up History
-
-Momentum signals require earlier prices.
-
-Validation and test periods therefore use rows from before their starting positions as warm-up history. This allows the first signals, positions, and transaction costs in each period to be calculated using the required historical information.
-
-Warm-up rows are used only as historical context. Their returns are not included in the performance of the evaluated period.
-
-Cumulative values are recalculated after the warm-up rows are removed, so each evaluated period measures only its own returns.
-
-## Momentum Optimisation
-
-The momentum optimisation logic is located in:
-
-`src/momentum_optimise.py`
-
-The optimisation process is:
-
-```text
-Evaluate all lookbacks on training data
-→ keep the strongest candidates
-→ evaluate those candidates on validation data
-→ select one final lookback
-→ evaluate it once on test data
-```
-
-`evaluate_momentum_period()` evaluates one momentum lookback over a specified period while preserving earlier rows as warm-up history.
-
-`evaluate_lookbacks_on_period()` compares several lookbacks over the same period.
-
-`select_top_lookbacks()` keeps the strongest candidates from the training results.
-
-`select_best_lookback()` chooses the strongest candidate from the validation results.
-
-`run_momentum_optimisation()` connects the complete training, validation, and test process.
-
-The test set is used only after the final lookback has been selected.
-
-## Mean-Reversion Strategy
-
-The mean-reversion strategy is located in `src/mean_reversion.py`.
-
-It measures how far the current closing price is from its recent rolling mean using a z-score.
-
-The z-score is:
-
-```text
-ZScore = (Close - RollingMean) / RollingStd
-```
-
-The strategy uses two thresholds:
-
-```text
-ZScore <= EntryThreshold → enter long
-ZScore >= ExitThreshold  → exit to cash
-```
-
-Unlike the momentum signal, the mean-reversion signal is stateful.
-
-Once the strategy enters a position, it remains long until the exit condition is reached.
-
-For example:
-
-```text
-EntryThreshold = -1.0
-ExitThreshold = 0.0
-```
-
-could produce:
-
-```text
-ZScore:  -1.5  -0.8  -0.3   0.2
-Signal:     1     1     1     0
-```
-
-The complete mean-reversion strategy is handled by:
-
-`run_mean_reversion()`
-
-Run the strategy with:
+Run the tests and frozen experiment:
 
 ```bash
-python -m src.mean_reversion
+python -m pytest -q
+python run_research.py --config config/default.json
 ```
 
-The results are saved to:
-
-`output/mean_reversion_results.csv`
-
-## Mean-Reversion Historical State
-
-Mean reversion requires more than just a fixed number of warm-up rows because its signal is stateful.
-
-For example, a position may have been entered before the beginning of a validation or test period and still be open when that period begins.
-
-When a mean-reversion period is evaluated, the strategy is therefore run using all historical data available up to the end of the requested period.
-
-Only the requested rows are then retained for performance evaluation.
-
-This preserves the strategy state at chronological boundaries while ensuring that earlier returns are not included in the evaluated period's performance.
-
-## Mean-Reversion Optimisation
-
-The mean-reversion optimisation logic is located in:
-
-`src/mean_reversion_optimise.py`
-
-The strategy has three parameters:
+The research command creates:
 
 ```text
-Lookback
-EntryThreshold
-ExitThreshold
+output/
+├── run_manifest.json
+├── oos_strategy_streams.csv
+├── dynamic_portfolio.csv
+├── walk_forward_windows.csv
+├── summary_metrics.csv
+├── bootstrap_intervals.csv
+├── randomisation_tests.csv
+├── cost_sensitivity.csv
+├── parameter_stability.csv
+├── final_report.md
+└── figures/
+    ├── oos_performance.png
+    ├── walk_forward_stability.png
+    ├── dynamic_allocation.png
+    └── robustness.png
 ```
 
-The optimisation process is:
+`output/` is ignored because it is regenerated. A curated snapshot of the frozen release is stored in `reports/`.
+
+The manifest records the full configuration, data and config hashes, package versions, random seed, Git commit and dirty state, OOS dates, unused trailing rows, and hashes of every output artifact.
+
+## Data
+
+`download_data.py` retrieves adjusted closes through [yfinance](https://ranaroussi.github.io/yfinance/reference/api/yfinance.download.html) with `auto_adjust=True` and builds complete intersection calendars. The configured range is 1 January 2010 to 1 January 2026; the end date is exclusive, so the last possible observation is 31 December 2025.
+
+Downloaded market data is ignored rather than redistributed. Exact input hashes for the published result are in the [frozen run manifest](reports/run_manifest.json). See [data/README.md](data/README.md) for the schema, provenance, and missing-data rules.
+
+## Testing
+
+The repository currently has 354 passing tests. They cover formulas and input validation as well as behavioral failures that are easy to miss in backtests:
+
+- first deployment from cash and parameter changes at window boundaries;
+- pair beta changes and leg-level turnover;
+- future-data perturbation invariance;
+- strict common-calendar and OOS-provenance rules;
+- missing-data and wealth guards;
+- metric consistency across strategy families;
+- bootstrap reproducibility and edge cases;
+- predictive and non-predictive timing-placebo behavior;
+- frozen cost sensitivity;
+- a full synthetic pipeline artifact smoke test.
+
+GitHub Actions runs the same suite on supported Python versions.
+
+## Limitations
+
+- Daily close execution is idealized. The model observes close `t`, transacts at that close, and earns the next close-to-close return.
+- Costs are proportional and omit spreads, market impact, borrow fees, taxes, capacity, and slippage variation.
+- A zero risk-free rate and 252 trading periods per year are assumed.
+- The project does not model asset-level netting across sleeves.
+- This historical OOS sequence was visible during earlier project development, so it is not a pristine institutional holdout.
+- Bootstrap intervals describe uncertainty conditional on this design; they do not prove alpha or correct for every research choice.
+- Historical Yahoo adjustments can change. The manifest identifies the exact files used for a run.
+
+This is a research and backtesting project, not investment advice or a live trading system.
+
+## Repository map
 
 ```text
-Evaluate all valid parameter combinations on training data
-→ keep the strongest candidate combinations
-→ evaluate those exact candidates on validation data
-→ select one final parameter combination
-→ evaluate it once on test data
+config/default.json       Frozen experiment definition
+download_data.py          Reproducible adjusted-price download
+run_research.py           One-command final pipeline
+src/data.py               Shared validation and data contracts
+src/metrics.py            Shared performance metrics
+src/*_optimise.py         Chronological candidate evaluation
+src/*_walk_forward.py     Expanding-window OOS evaluation
+src/integration.py        Standardized streams, baselines, and dynamic portfolio
+src/robustness.py         Bootstrap and timing placebo
+src/sensitivity.py        Cost, window, and parameter stability
+src/reporting.py          Tables, figures, and final report
+tests/                    Unit, behavioral, and end-to-end tests
+reports/                  Curated frozen output snapshot
 ```
 
-`evaluate_mean_reversion_period()` evaluates one complete parameter combination over a specified period.
-
-`evaluate_mean_reversion_parameters_on_period()` evaluates the full parameter grid.
-
-`select_top_mean_reversion_parameters()` keeps the strongest candidate combinations from the training results.
-
-`evaluate_mean_reversion_candidates_on_period()` evaluates those exact combinations on the validation period.
-
-`select_best_mean_reversion_parameters()` selects the strongest validation candidate.
-
-`run_mean_reversion_optimisation()` connects the complete training, validation, and test process.
-
-Candidate combinations remain together during validation.
-
-For example:
-
-```text
-Lookback 20, Entry -1.5, Exit 0.0
-Lookback 50, Entry -2.0, Exit 0.5
-```
-
-are treated as two individual candidates rather than creating new combinations from their separate parameter values.
-
-The test set is used only after the final parameter combination has been selected.
-
-## Pairs Trading Strategy
-
-The pairs-trading strategy is located in:
-
-`src/pairs.py`
-
-Instead of trading one asset based only on its own price history, pairs trading studies the relationship between two assets.
-
-The relationship is estimated using ordinary least-squares regression:
-
-```text
-CloseA = Alpha + Beta × CloseB + Error
-```
-
-`Alpha` is the regression intercept.
-
-`Beta` is the hedge ratio describing how much `CloseA` tends to change relative to `CloseB`.
-
-The estimated value of `CloseA` is:
-
-```text
-PredictedA = Alpha + Beta × CloseB
-```
-
-The pair spread is the regression residual:
-
-```text
-Spread = CloseA - PredictedA
-```
-
-or equivalently:
-
-```text
-Spread = CloseA - Alpha - Beta × CloseB
-```
-
-The trading strategy looks for unusually large deviations in this spread.
-
-## Pair Spread Z-Score
-
-The spread is standardised using a rolling z-score:
-
-```text
-ZScore = (Spread - RollingMean) / RollingStd
-```
-
-The pairs strategy uses symmetric entry conditions.
-
-For example:
-
-```text
-EntryThreshold = 2.0
-ExitThreshold = 0.5
-```
-
-A sufficiently negative spread produces a long-spread signal:
-
-```text
-ZScore <= -EntryThreshold → Signal = 1
-```
-
-A sufficiently positive spread produces a short-spread signal:
-
-```text
-ZScore >= EntryThreshold → Signal = -1
-```
-
-The strategy exits when the spread moves back toward its normal range.
-
-For a positive hedge ratio:
-
-```text
-Signal = 1
-→ long A
-→ short Beta units of B
-
-Signal = -1
-→ short A
-→ long Beta units of B
-
-Signal = 0
-→ flat
-```
-
-Like mean reversion, the pairs signal is stateful.
-
-## Pair Regression
-
-The pair regression is calculated by:
-
-`calculate_pair_regression()`
-
-It estimates:
-
-```text
-Alpha
-Beta
-```
-
-using historical observations of `CloseA` and `CloseB`.
-
-The regression coefficients are kept separate from `run_pair_strategy()`.
-
-This is important for out-of-sample testing.
-
-For example:
-
-```text
-Training data
-→ estimate Alpha and Beta
-
-Validation data
-→ use the already-estimated Alpha and Beta
-```
-
-The validation period is not allowed to estimate the relationship that is supposedly being tested on that same future period.
-
-The same principle applies to test periods.
-
-## Pair Stationarity and Cointegration
-
-Pairs trading relies on the idea that two individually wandering price series may still maintain a relatively stable long-run relationship.
-
-Two related statistical diagnostics are included.
-
-### Augmented Dickey-Fuller Test
-
-`test_spread_stationarity()` applies an Augmented Dickey-Fuller test to the calculated spread.
-
-The null hypothesis is that the spread contains a unit root and is non-stationary.
-
-A sufficiently small p-value provides evidence against that null hypothesis.
-
-The ADF test therefore asks:
-
-```text
-Is this particular spread stationary?
-```
-
-### Cointegration Test
-
-`test_pair_cointegration()` applies an Engle-Granger cointegration test to `CloseA` and `CloseB`.
-
-It asks whether the two price series have evidence of a stable long-run linear relationship despite potentially being non-stationary individually.
-
-The null hypothesis is that the two price series are not cointegrated.
-
-A sufficiently small p-value provides evidence against that null hypothesis.
-
-The two diagnostics are related but serve slightly different purposes:
-
-```text
-ADF
-→ tests the calculated spread directly
-
-Cointegration
-→ formally tests whether A and B have a stationary long-run relationship
-```
-
-The cointegration test is treated as the primary formal test of the pair relationship.
-
-## Pair Backtesting
-
-Pairs trading requires separate return calculations because a spread position contains two asset positions.
-
-The one-period pair P&L is:
-
-```text
-PairPnL =
-PositionA × ChangeInA
-+
-PositionB × ChangeInB
-```
-
-Gross exposure is:
-
-```text
-GrossExposure =
-|PositionA| × PreviousCloseA
-+
-|PositionB| × PreviousCloseB
-```
-
-The strategy return is:
-
-```text
-StrategyReturn = PairPnL / GrossExposure
-```
-
-Signals are still delayed by one period:
-
-```text
-SpreadPosition[t] = Signal[t - 1]
-```
-
-so current information cannot earn the current period's return.
-
-Transaction costs are currently based on changes in the spread position.
-
-For example:
-
-```text
-0 → 1     turnover = 1
-1 → 0     turnover = 1
-1 → -1    turnover = 2
-```
-
-The complete strategy pipeline is handled by:
-
-`run_pair_strategy()`
-
-Run the standalone strategy with:
-
-```bash
-python -m src.pairs
-```
-
-The results are saved to:
-
-`output/pair_results.csv`
-
-The standalone run estimates the pair regression using the complete supplied dataset, so it should be treated as an exploratory in-sample backtest.
-
-The optimisation and walk-forward pipelines provide the more meaningful out-of-sample evaluation.
-
-## Pair Optimisation
-
-The pair optimisation logic is located in:
-
-`src/pairs_optimise.py`
-
-The user-supplied strategy parameters are:
-
-```text
-Lookback
-EntryThreshold
-ExitThreshold
-```
-
-`Alpha` and `Beta` are not grid-search parameters.
-
-They are estimated from historical price data using regression.
-
-The optimisation process is:
-
-```text
-Estimate the pair relationship from available training data
-→ evaluate all valid strategy parameter combinations on training data
-→ keep the strongest candidate combinations
-→ evaluate those candidates on validation data
-→ select the strongest candidate
-→ evaluate it on test data
-```
-
-`evaluate_pair_period()` evaluates one parameter combination while preserving the required historical context.
-
-For validation periods, the regression is fitted using data before the validation period.
-
-For test periods, the regression is fitted using all data available before the test period.
-
-This prevents validation and test prices from being used to estimate their own regression coefficients.
-
-`evaluate_pair_parameters_on_period()` evaluates the complete parameter grid.
-
-`select_top_pair_parameters()` keeps the strongest training candidates.
-
-`evaluate_pair_candidates_on_period()` evaluates those candidates on validation data.
-
-`select_best_pair_parameters()` chooses the strongest validation candidate.
-
-`run_pair_optimisation()` connects the complete training-validation-test process.
-
-## Data Splitting
-
-The chronological data-splitting logic is located in `src/split.py`.
-
-For the basic optimisation pipelines, historical data is divided into:
-
-- Training data for comparing candidate parameters
-- Validation data for choosing between the strongest candidates
-- Test data for one final evaluation
-
-The data is never shuffled because future prices must not be used to make decisions about earlier periods.
-
-The default split is:
-
-```text
-60% training
-20% validation
-20% testing
-```
-
-## Walk-Forward Window Generation
-
-The generic walk-forward window logic is located in:
-
-`src/walk_forward.py`
-
-This file only generates chronological train-validation-test boundaries.
-
-It does not contain strategy-specific logic.
-
-The project uses an expanding training window.
-
-Example:
-
-```text
-Window 1:
-Training      0–399
-Validation  400–499
-Test        500–599
-
-Window 2:
-Training      0–499
-Validation  500–599
-Test        600–699
-
-Window 3:
-Training      0–599
-Validation  600–699
-Test        700–799
-```
-
-The training period grows as more historical data becomes available.
-
-`generate_walk_forward_windows()` creates these chronological window boundaries.
-
-## Momentum Walk-Forward Evaluation
-
-The momentum walk-forward logic is located in:
-
-`src/momentum_walk_forward.py`
-
-A single train-validation-test split can produce results that depend heavily on one particular test period.
-
-Walk-forward evaluation repeats the optimisation process across multiple points in time.
-
-For each momentum window, the process is:
-
-```text
-Evaluate all lookbacks on training data
-→ keep the strongest candidates
-→ evaluate them on validation data
-→ select the best lookback
-→ use that lookback on the unseen test period
-```
-
-The selected lookback is allowed to change between windows.
-
-For example:
-
-```text
-Test period 1 → lookback 5
-Test period 2 → lookback 20
-Test period 3 → lookback 10
-```
-
-`run_momentum_walk_forward_window()` performs training, validation, lookback selection, and testing for one window.
-
-`run_momentum_walk_forward()` executes every window and combines all unseen test periods into one out-of-sample performance history.
-
-The cumulative values are recalculated after the test periods are combined so capital continues between windows rather than resetting to 1 at the start of each test period.
-
-Overall performance statistics are then calculated across the full combined out-of-sample period.
-
-## Mean-Reversion Walk-Forward Evaluation
-
-The mean-reversion walk-forward logic is located in:
-
-`src/mean_reversion_walk_forward.py`
-
-For each mean-reversion window, the process is:
-
-```text
-Evaluate all parameter combinations on training data
-→ keep the strongest candidate combinations
-→ evaluate those candidates on validation data
-→ select the best parameter combination
-→ use that combination on the unseen test period
-```
-
-The selected:
-
-```text
-Lookback
-EntryThreshold
-ExitThreshold
-```
-
-can change between windows.
-
-`run_mean_reversion_walk_forward_window()` performs optimisation and testing for one window.
-
-`run_mean_reversion_walk_forward()` executes every window and combines all unseen test periods into one out-of-sample performance history.
-
-As with momentum, cumulative values are recalculated across the combined test periods so capital continues between windows.
-
-## Pair Walk-Forward Evaluation
-
-The pair walk-forward logic is located in:
-
-`src/pairs_walk_forward.py`
-
-For each pair window, the process is:
-
-```text
-Estimate the pair relationship from historical data
-→ evaluate parameter combinations on training data
-→ keep the strongest candidates
-→ evaluate those candidates on validation data
-→ select the best parameter combination
-→ estimate the relationship using all available pre-test data
-→ evaluate the strategy on the unseen test period
-```
-
-The selected:
-
-```text
-Lookback
-EntryThreshold
-ExitThreshold
-```
-
-can change between windows.
-
-The regression coefficients can also change as additional historical information becomes available.
-
-However, each validation or test period uses coefficients estimated without looking into that period's future prices.
-
-`run_pair_walk_forward_window()` performs the complete optimisation and test process for one window.
-
-`run_pair_walk_forward()` executes every window and combines the unseen test periods into a single out-of-sample performance history.
-
-Cumulative strategy values are recalculated after the test periods are combined so capital continues across walk-forward windows.
-
-## Multi-Asset Portfolio Construction
-
-General multi-asset portfolio logic is located in:
-
-`src/portfolio.py`
-
-Returns are calculated independently for every asset.
-
-The portfolio module can calculate:
-
-- Asset returns
-- Correlation matrices
-- Covariance matrices
-- Equal portfolio weights
-- Inverse-volatility weights
-- Portfolio returns
-- Portfolio volatility
-- Rebalancing turnover
-- Transaction costs
-- Portfolio performance statistics
-
-Equal weighting assigns:
-
-```text
-Weight = 1 / NumberOfAssets
-```
-
-Inverse-volatility weighting assigns more capital to assets with lower historical volatility:
-
-```text
-Weight_i =
-(1 / Volatility_i)
-/
-Sum(1 / Volatility_j)
-```
-
-This is a simple inverse-volatility allocation rather than full risk-parity optimisation.
-
-Portfolio variance is calculated using:
-
-```text
-PortfolioVariance = wᵀ Σ w
-```
-
-where `w` is the vector of portfolio weights and `Σ` is the asset covariance matrix.
-
-Portfolio volatility is:
-
-```text
-PortfolioVolatility = sqrt(PortfolioVariance)
-```
-
-Run the standalone portfolio example with:
-
-```bash
-python -m src.portfolio
-```
-
-The results are saved to:
-
-`output/portfolio_results.csv`
-
-## Portfolio Rebalancing and Costs
-
-Fixed target weights drift when assets produce different returns.
-
-The drifted weight of an asset is calculated as:
-
-```text
-DriftedWeight =
-TargetWeight × (1 + AssetReturn)
-/
-(1 + PortfolioReturn)
-```
-
-Turnover measures the amount of trading required to restore the target weights.
-
-Transaction costs are applied proportionally:
-
-```text
-TransactionCost = Turnover × CostRate
-```
-
-and:
-
-```text
-NetPortfolioReturn =
-PortfolioReturn - TransactionCost
-```
-
-## Dynamic Multi-Strategy Portfolio
-
-Dynamic strategy allocation is located in:
-
-`src/dynamic_portfolio.py`
-
-Instead of assigning one strategy permanently to each asset, the dynamic portfolio compares recent momentum and mean-reversion performance separately for every asset.
-
-For each strategy, recent risk-adjusted performance is measured using a rolling annualised Sharpe-style score:
-
-```text
-Score =
-RollingMeanReturn
-/
-RollingReturnStd
-× sqrt(252)
-```
-
-Strategy returns are shifted by one period before calculating the score:
-
-```text
-PastReturns[t] = StrategyReturn[t - 1]
-```
-
-This ensures that the strategy selected for the current period cannot use that period's realised return.
-
-## Dynamic Strategy Selection
-
-Momentum and mean reversion are compared independently for every asset.
-
-The strategy with the strongest positive score is selected.
-
-For example:
-
-```text
-A Momentum Score        1.3
-A Mean-Reversion Score  0.4
-→ select A momentum
-
-B Momentum Score       -0.2
-B Mean-Reversion Score  0.8
-→ select B mean reversion
-
-C Momentum Score       -0.3
-C Mean-Reversion Score -0.1
-→ select neither
-```
-
-If both strategies have non-positive scores, the asset remains inactive.
-
-Capital is equally divided across active assets.
-
-For example:
-
-```text
-A active
-B active
-C inactive
-
-A Weight = 0.5
-B Weight = 0.5
-C Weight = 0
-```
-
-If no asset has a positive selected strategy, the portfolio remains in cash.
-
-The selected strategy return for each asset is:
-
-```text
-SelectedStrategyReturn =
-MomentumSelected × MomentumReturn
-+
-MeanReversionSelected × MeanReversionReturn
-```
-
-The portfolio return is then the weighted sum of the selected strategy returns.
-
-## Dynamic Portfolio Turnover
-
-The dynamic portfolio tracks strategy-specific weights such as:
-
-```text
-A_MomentumWeight
-A_MeanReversionWeight
-```
-
-This allows turnover to capture both asset rebalancing and changes between strategies.
-
-Previous strategy weights are adjusted for their realised returns:
-
-```text
-DriftedWeight[t] =
-PreviousWeight × (1 + PreviousStrategyReturn)
-/
-(1 + PreviousPortfolioReturn)
-```
-
-Turnover is then calculated from the difference between the drifted previous allocation and the new target allocation.
-
-This means that switching from momentum to mean reversion requires exiting one strategy allocation and entering the other.
-
-Dynamic transaction costs are deducted before net portfolio performance is calculated.
-
-The reported statistics include:
-
-- Gross portfolio return
-- Net portfolio return
-- Annualised return
-- Annualised volatility
-- Sharpe ratio
-- Maximum drawdown
-- Total turnover
-- Total transaction cost
-- Time in the market
-
-Run the dynamic portfolio with:
-
-```bash
-python -m src.dynamic_portfolio
-```
-
-The results are saved to:
-
-`output/dynamic_portfolio_results.csv`
-
-The dynamic allocator currently expects momentum and mean-reversion return streams to have already been generated.
-
-A later integration step will connect the existing strategy and walk-forward pipelines directly to the dynamic portfolio.
-
-## Project Structure
-
-```text
-quant-project/
-├── data/
-│   ├── prices.csv
-│   ├── pair_prices.csv
-│   ├── portfolio_prices.csv
-│   └── dynamic_strategy_returns.csv
-├── output/
-│   ├── analysed_prices.csv
-│   ├── momentum_results.csv
-│   ├── mean_reversion_results.csv
-│   ├── pair_results.csv
-│   ├── portfolio_results.csv
-│   └── dynamic_portfolio_results.csv
-├── src/
-│   ├── analyse.py
-│   ├── backtest.py
-│   ├── split.py
-│   ├── walk_forward.py
-│   ├── momentum.py
-│   ├── momentum_optimise.py
-│   ├── momentum_walk_forward.py
-│   ├── mean_reversion.py
-│   ├── mean_reversion_optimise.py
-│   ├── mean_reversion_walk_forward.py
-│   ├── pairs.py
-│   ├── pairs_optimise.py
-│   ├── pairs_walk_forward.py
-│   ├── portfolio.py
-│   └── dynamic_portfolio.py
-├── tests/
-│   ├── test_analyse.py
-│   ├── test_backtest.py
-│   ├── test_split.py
-│   ├── test_walk_forward.py
-│   ├── test_momentum.py
-│   ├── test_momentum_optimise.py
-│   ├── test_momentum_walk_forward.py
-│   ├── test_mean_reversion.py
-│   ├── test_mean_reversion_optimise.py
-│   ├── test_mean_reversion_walk_forward.py
-│   ├── test_pairs.py
-│   ├── test_pairs_optimise.py
-│   ├── test_pairs_walk_forward.py
-│   ├── test_portfolio.py
-│   └── test_dynamic_portfolio.py
-├── .gitignore
-├── README.md
-└── requirements.txt
-```
-
-## Running the Tests
-
-Run the complete test suite with:
-
-```bash
-python -m pytest -v
-```
-
-Run a specific test file with:
-
-```bash
-python -m pytest tests/test_analyse.py -v
-python -m pytest tests/test_backtest.py -v
-python -m pytest tests/test_split.py -v
-python -m pytest tests/test_walk_forward.py -v
-
-python -m pytest tests/test_momentum.py -v
-python -m pytest tests/test_momentum_optimise.py -v
-python -m pytest tests/test_momentum_walk_forward.py -v
-
-python -m pytest tests/test_mean_reversion.py -v
-python -m pytest tests/test_mean_reversion_optimise.py -v
-python -m pytest tests/test_mean_reversion_walk_forward.py -v
-
-python -m pytest tests/test_pairs.py -v
-python -m pytest tests/test_pairs_optimise.py -v
-python -m pytest tests/test_pairs_walk_forward.py -v
-
-python -m pytest tests/test_portfolio.py -v
-python -m pytest tests/test_dynamic_portfolio.py -v
-```
-
-The pairs strategy introduces `statsmodels` for the ADF and Engle-Granger cointegration tests.
-
-## Current Limitations
-
-The project currently:
-
-- Uses closing prices only
-- Uses fixed parameter grids supplied by the researcher
-- Uses expanding-window walk-forward evaluation only
-- Uses simplified proportional transaction costs
-- Does not model bid-ask spreads
-- Does not model slippage
-- Does not model market impact
-- Supports equal and inverse-volatility static portfolio weighting but not general portfolio optimisation
-- Uses equal weighting across active assets in the dynamic portfolio
-- Does not model leverage explicitly
-- Assumes 252 trading periods per year
-- Assumes a zero risk-free rate when calculating Sharpe ratios
-- Does not yet perform bootstrap or permutation-based statistical robustness testing
-- Uses OLS to estimate a single linear hedge ratio for pairs trading
-- Does not dynamically update the pair hedge ratio inside an individual test period
-- Uses a simplified pair transaction-cost model based on spread-position turnover
-- Requires dynamic strategy-return streams to be generated separately before running the dynamic allocator
-
-There is also a transaction-cost detail at walk-forward boundaries that can be improved.
-
-If selected strategy parameters change between consecutive walk-forward windows, the first transaction cost in the new window is currently based on the position generated by the newly selected strategy rather than explicitly using the final deployed position from the previous test window.
-
-For pairs trading, the same issue can also arise when the estimated hedge ratio changes between consecutive windows.
-
-This can be refined later when the execution model is made more realistic.
-
-## Current Progress
-
-Completed components include:
-
-```text
-Price loading and analysis
-→ reusable single-asset backtesting
-→ momentum
-→ mean reversion
-→ train-validation-test optimisation
-→ historical warm-up and state handling
-→ expanding-window walk-forward evaluation
-→ pairs trading
-→ regression and hedge-ratio estimation
-→ stationarity and cointegration testing
-→ pair optimisation and walk-forward evaluation
-→ multi-asset return analysis
-→ correlation and covariance analysis
-→ equal and inverse-volatility portfolio weighting
-→ portfolio risk and rebalancing
-→ dynamic per-asset strategy selection
-→ dynamic multi-asset allocation
-→ portfolio turnover and transaction costs
-```
-
-The remaining major stages are integrating the existing strategy pipelines directly into the dynamic portfolio and performing stronger statistical robustness testing.
+The full frozen result and its assumptions are in [reports/final_report.md](reports/final_report.md).

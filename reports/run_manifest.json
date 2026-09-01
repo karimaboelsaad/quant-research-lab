@@ -1,0 +1,231 @@
+{
+  "config": {
+    "data": {
+      "adjusted_prices": true,
+      "calendar_policy": "intersection",
+      "end_date": "2026-01-01",
+      "multi_asset_path": "data/research/portfolio_prices.csv",
+      "multi_asset_tickers": [
+        "SPY",
+        "TLT",
+        "GLD"
+      ],
+      "pair_path": "data/research/pair_prices.csv",
+      "pair_tickers": [
+        "KO",
+        "PEP"
+      ],
+      "provider": "Yahoo Finance via yfinance",
+      "single_asset_path": "data/research/prices.csv",
+      "single_asset_ticker": "SPY",
+      "start_date": "2010-01-01"
+    },
+    "dynamic": {
+      "overlay_cost_rate": 0.001,
+      "score_lookback": 60
+    },
+    "execution": {
+      "decision_time": "close_t",
+      "execution_assumption": "idealized_close_t",
+      "return_interval": "close_t_to_close_t_plus_1"
+    },
+    "mean_reversion": {
+      "cost_rate": 0.001,
+      "entry_thresholds": [
+        -1.0,
+        -1.5,
+        -2.0
+      ],
+      "exit_thresholds": [
+        0.0,
+        0.5
+      ],
+      "lookbacks": [
+        20,
+        60,
+        120
+      ],
+      "top_candidates": 3
+    },
+    "momentum": {
+      "cost_rate": 0.001,
+      "lookbacks": [
+        20,
+        60,
+        120,
+        252
+      ],
+      "top_candidates": 2
+    },
+    "pairs": {
+      "cost_rate": 0.001,
+      "entry_thresholds": [
+        1.0,
+        1.5,
+        2.0
+      ],
+      "exit_thresholds": [
+        0.0,
+        0.5
+      ],
+      "lookbacks": [
+        20,
+        60,
+        120
+      ],
+      "selection_policy": "predefined_pair",
+      "top_candidates": 3
+    },
+    "portfolio": {
+      "cost_rate": 0.001,
+      "inverse_volatility_estimation": "pre_oos_frozen"
+    },
+    "project": {
+      "annualisation_periods": 252,
+      "name": "quant-research-system",
+      "primary_hypothesis": "The lagged dynamic portfolio improves risk-adjusted net OOS performance over its static and standalone baselines.",
+      "random_seed": 20260820
+    },
+    "reporting": {
+      "minimum_oos_observations": 100
+    },
+    "robustness": {
+      "bootstrap_resamples": 5000,
+      "confidence_level": 0.95,
+      "cost_rates": [
+        0.0,
+        0.0005,
+        0.001,
+        0.002
+      ]
+    },
+    "walk_forward": {
+      "include_partial_final_window": false,
+      "initial_train_size": 1000,
+      "test_size": 126,
+      "validation_size": 252
+    }
+  },
+  "config_path": "config/default.json",
+  "config_sha256": "247861d36e05db8c71680e080a4b2f1c550d865ef72d302f0b514dad7696ec14",
+  "data_files": {
+    "multi_asset": {
+      "bytes": 221801,
+      "end_date": "2025-12-31",
+      "path": "data/research/portfolio_prices.csv",
+      "rows": 4024,
+      "sha256": "f1a4b373a5a42277a8e92ade286926151ac222b3697681c3fab61534c48cc2b9",
+      "start_date": "2010-01-04",
+      "unused_trailing_rows": 0
+    },
+    "pair": {
+      "bytes": 158630,
+      "end_date": "2025-12-31",
+      "path": "data/research/pair_prices.csv",
+      "rows": 4024,
+      "sha256": "4c5a7a9b3e14a4f1b74b0f9858c129b6b08f21f9581c906d263260bfc273086b",
+      "start_date": "2010-01-04",
+      "unused_trailing_rows": 0
+    },
+    "single_asset": {
+      "bytes": 104212,
+      "end_date": "2025-12-31",
+      "path": "data/research/prices.csv",
+      "rows": 4024,
+      "sha256": "2cb22421083ba078b6f65ec8e53eb5f7ae74946cd751240e6fd291e9598722c6",
+      "start_date": "2010-01-04",
+      "unused_trailing_rows": 0
+    }
+  },
+  "generated_at_utc": "2026-08-26T20:47:56.238786+00:00",
+  "git": {
+    "commit": "b9dda3c70fdc02c818711dbc1a01a72a8f605e03",
+    "dirty": true
+  },
+  "package_versions": {
+    "matplotlib": "3.10.6",
+    "numpy": "2.3.5",
+    "pandas": "2.3.3",
+    "pytest": "8.4.2",
+    "statsmodels": "0.14.5",
+    "yfinance": "1.6.0"
+  },
+  "python_version": "3.13.9",
+  "run_metadata": {
+    "artifacts": [
+      {
+        "bytes": 2681288,
+        "path": "output/oos_strategy_streams.csv",
+        "sha256": "1344dd4c4b75511c3a94316e6af2685fd03e2e91c28cb0c252a4dceb45528631"
+      },
+      {
+        "bytes": 2466520,
+        "path": "output/dynamic_portfolio.csv",
+        "sha256": "0f40e3516e79936c46100e5675f4a4e178ff7d7580d7e70ce10654184b79a6a4"
+      },
+      {
+        "bytes": 38471,
+        "path": "output/walk_forward_windows.csv",
+        "sha256": "7df144ae03ed254e137c362ac21d4481c9b7e8fee081774d883b9daf491e7605"
+      },
+      {
+        "bytes": 2846,
+        "path": "output/summary_metrics.csv",
+        "sha256": "5b38a2e8e7557d1c5edc4021855c40a5a6c6c318cdd11f79914804bf6dc9662b"
+      },
+      {
+        "bytes": 1286,
+        "path": "output/bootstrap_intervals.csv",
+        "sha256": "5f4263221bf419a45758377362cf93060d42468a8bc72add046ebaf905339568"
+      },
+      {
+        "bytes": 331,
+        "path": "output/randomisation_tests.csv",
+        "sha256": "ee1629abbc68ff8e229cf2f51b10bf3b3f92b346d63221ed2db0cddced1cbd63"
+      },
+      {
+        "bytes": 1113,
+        "path": "output/cost_sensitivity.csv",
+        "sha256": "1669ac65b544b8af7fd3ddecd5041e4beb3d44bca736004f01fbc8c7feb68d78"
+      },
+      {
+        "bytes": 66254,
+        "path": "output/parameter_stability.csv",
+        "sha256": "14e1d0d5ba0d55956f0a68f8100ed990f025cefd50390e08fe791f61f7960043"
+      },
+      {
+        "bytes": 4880,
+        "path": "output/final_report.md",
+        "sha256": "67088455f927183f97bb5b6d20b8bd2b16c7049b835d8a374332fee5232f3c82"
+      },
+      {
+        "bytes": 246303,
+        "path": "output/figures/oos_performance.png",
+        "sha256": "c9f85a7fcb9d5dac647be2a24a3b5880a95e380eda2c2cced7411298be389e62"
+      },
+      {
+        "bytes": 421816,
+        "path": "output/figures/walk_forward_stability.png",
+        "sha256": "efef93d877d92b8a50d45d22f5a75e403ef64958044ab30d7664d0d8f86867f2"
+      },
+      {
+        "bytes": 324101,
+        "path": "output/figures/dynamic_allocation.png",
+        "sha256": "d67d5101c7d8f5842f552ff6b2d2bdc27d6ae019a14d955b6015f92f31964532"
+      },
+      {
+        "bytes": 81859,
+        "path": "output/figures/robustness.png",
+        "sha256": "c17b886ae4af1251caf31c58fbe5dbea707dd18c147e0e237b03b16a9e852abd"
+      }
+    ],
+    "common_end_date": "2025-12-31",
+    "common_start_date": "2015-03-23",
+    "evaluation_type": "frozen_walk_forward_oos",
+    "oos_end_date": "2025-12-31",
+    "oos_start_date": "2014-12-23",
+    "pair_oos_end_date": "2025-12-31",
+    "pair_oos_start_date": "2014-12-23",
+    "primary_hypothesis": "The lagged dynamic portfolio improves risk-adjusted net OOS performance over its static and standalone baselines."
+  }
+}
