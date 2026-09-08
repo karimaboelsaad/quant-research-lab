@@ -286,7 +286,8 @@ def run_dynamic_timing_placebo(dynamic_results,assets,overlay_cost_rate,resample
 
     lower_percentile=(1-confidence_level)/2*100
     upper_percentile=(1+confidence_level)/2*100
-    raw_p_value=(1+np.sum(finite_null>=observed_sharpe))/(len(finite_null)+1)
+    null_at_least_observed=(finite_null>observed_sharpe)|np.isclose(finite_null,observed_sharpe,rtol=1e-12,atol=1e-12)
+    raw_p_value=(1+np.sum(null_at_least_observed))/(len(finite_null)+1)
     lower,median,upper=np.percentile(finite_null,[lower_percentile,50,upper_percentile])
 
     return pd.DataFrame([{

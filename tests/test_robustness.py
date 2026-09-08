@@ -70,4 +70,4 @@ def test_dynamic_timing_placebo_does_not_reward_constant_allocation():
     results=run_dynamic_timing_placebo(_build_dynamic_placebo_frame(False),["A"],0.0,100,0.95,44)
 
     assert results.loc[0,"Status"]=="ok"
-    assert results.loc[0,"RawPValue"]>0.1
+    assert results.loc[0,"RawPValue"]==1.0
